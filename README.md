@@ -61,14 +61,17 @@ node cli.mjs check sample-data/iris.csv plan.json
 
 ## 示例数据（全部是公开真实数据集）
 
-`sample-data` 里四份 CSV 都来自公开数据集仓库（Rdatasets 镜像，即 R 内置数据集），**没有一个数字是编的**：
+ `sample-data` 里有中文数据，也有英文经典数据集，**没有一个数字是编的**：
 
 | 文件 | 来源 | 行数 | 能演示什么 |
 | :-- | :-- | --: | :-- |
-| iris.csv | R 内置 iris（Fisher 1936 / UCI 收录） | 150 | 分组汇总、两组 t 检验、相关、直方图 |
-| faithful.csv | R 内置 faithful（黄石老忠实泉） | 272 | 相关、直方图、回归 |
-| airpassengers.csv | R 内置 AirPassengers（Box & Jenkins 经典序列） | 144 | 时间趋势、按月分组 |
-| airquality.csv | R 内置 airquality（1973 纽约空气质量） | 153 | **缺失值**（Ozone 37 个 NA）、相关、分组 |
+| 中国70城房价指数_环比.csv | 国家统计局 70 城房价指数（[镜像仓库](https://github.com/wofeiwo/70city-price-skill)） | 16,800 | 分组汇总（按城市）、相关、时间趋势、分布 |
+| 中国70城房价指数_同比.csv | 同上（同比口径） | 16,800 | 同上 |
+| 中国70城房价_2025年12月.csv | 同上（2025-12 横截面） | 70 | 城市间分布、极值 |
+| iris.csv | R 内置 iris（Fisher 1936 / UCI） | 150 | 3 物种分组、t 检验、相关、直方图 |
+| faithful.csv | R 内置 faithful（老忠实泉） | 272 | 相关、双峰直方图 |
+| airpassengers.csv | R 内置 AirPassengers | 144 | 时间趋势 |
+| airquality.csv | R 内置 airquality（1973 纽约） | 153 | **缺失值**（37 个 NA）、相关 |
 
 来源、许可与列名映射写在 [sample-data/README.md](sample-data/README.md)；原始文件可到数据源逐行核对。想用自己的数据，把 CSV 拖进界面即可。
 
@@ -101,6 +104,10 @@ node serve.mjs
 | 分析计划（破坏性步骤需人工确认） | 结论 → 步骤 → 图（分组均值柱状图） |
 | :--: | :--: |
 | ![计划](docs/ui-03-plan.png) | ![结果](docs/ui-04-results.png) |
+
+| 中文数据：70 城房价指数（按城市分组，只画前 12 组） | |
+| :--: | :-- |
+| ![中文数据](docs/ui-06-cn-results.png) | 新建 vs 二手住宅指数 r = 0.6234（n = 16800），按城市分组 70 组 |
 
 | 审计模式：报告里的结论逐条重算 | |
 | :--: | :-- |

@@ -134,7 +134,17 @@ $('intentChips').addEventListener('click', (e) => {
 $('clearIntents').addEventListener('click', () => { selectedOps.clear(); renderIntentChips(); });
 
 function getGroupColumns() {
-  return (state.dataset?.columns || []).filter((c) => c.kind === 'string');
+  const cols = (state.dataset?.columns || []).filter((c) => c.kind === 'string');
+  // 分组列按「不同取值个数」从少到多排：城市(70) 比 日期(192) 更适合当分组
+  return cols
+    .map((c) => {
+      const seen = new Set();
+      for (const row of state.dataset.rows) seen.add(String(row[c.index] ?? '').trim());
+      seen.delete('');
+      return { ...c, card: seen.size };
+    })
+    .filter((c) => c.card >= 2)
+    .sort((a, b) => a.card - b.card);
 }
 
 function fillColumnSelects() {
@@ -388,8 +398,13 @@ function renderChart(run) {
   if (has('scatter')) return renderScatterChart(run);
   const group = run.steps.find((s) => s.op === 'group_summary');
   if (group) {
-    return renderBars(group.output.groups.map((g) => ({ label: g.group, value: g.mean, sub: `n=${g.n}` })), {
-      title: `${group.output.column} 各组均值`, xLabel: group.output.groupBy, yLabel: group.output.column, stepId: group.id,
+    const all = group.output.groups;
+    const shown = all.length > 12 ? all.slice(0, 12) : all; // 组太多时只画前 12 组（按均值降序）
+    return renderBars(shown.map((g) => ({ label: g.group, value: g.mean, sub: `n=${g.n}` })), {
+      title: all.length > 12 ? `${group.output.column} 各组均值（前 12 组，共 ${all.length} 组）` : `${group.output.column} 各组均值`,
+      xLabel: group.output.groupBy,
+      yLabel: group.output.column,
+      stepId: group.id,
     });
   }
   const hist = run.steps.find((s) => s.op === 'histogram');
