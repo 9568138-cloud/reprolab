@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>溯真 ReproLab · 可溯源的数据分析</title>
+<link rel="stylesheet" href="./src/styles.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">溯</span>
+    <div>
+      <h1>溯真 ReproLab</h1>
+      <p class="tagline">说一句话 → 编译成可审阅的分析计划 → 每条结论都能回溯到计算步骤</p>
+    </div>
+  </div>
+  <div class="pill" id="statusPill">未载入数据</div>
+</header>
+
+<main>
+  <section class="card" id="step1">
+    <div class="card-head">
+      <h2><span class="num">01</span>数据接入</h2>
+      <span class="hint">CSV / 粘贴文本；原始层只读并记录 SHA-256</span>
+    </div>
+    <div class="grid-2">
+      <label class="dropzone" id="dropzone">
+        <input type="file" id="fileInput" accept=".csv,text/csv" hidden />
+        <strong>点击选择 CSV</strong>
+        <span>或把文件拖到这里</span>
+      </label>
+      <div>
+        <textarea id="pasteInput" rows="6" placeholder="也可以直接粘贴 CSV 文本，例如：&#10;temp_c,resistance_kohm&#10;20,10.02&#10;22,9.41"></textarea>
+        <div class="row">
+          <button class="btn ghost" id="loadSample">载入示例（热敏电阻）</button>
+          <button class="btn" id="loadPaste">导入粘贴内容</button>
+        </div>
+      </div>
+    </div>
+    <div id="datasetInfo" class="dataset-info hidden"></div>
+  </section>
+
+  <section class="card" id="step2">
+    <div class="card-head">
+      <h2><span class="num">02</span>用一句话提需求</h2>
+      <span class="hint">AI 只负责编译计划，不写代码、不碰数据</span>
+    </div>
+    <input id="question" class="input" placeholder="例：这组热敏电阻数据，温度升高是不是真的让阻值下降？有没有要去掉的异常点？帮我出一张能放进报告的图。" />
+    <div class="row">
+      <button class="btn primary" id="compileBtn">编译分析计划</button>
+      <button class="btn ghost" id="toggleLLM">配置 LLM（可选）</button>
+      <span class="hint" id="compileHint"></span>
+    </div>
+    <div id="llmBox" class="llm-box hidden">
+      <input id="llmEndpoint" class="input" value="https://api.deepseek.com/chat/completions" />
+      <input id="llmKey" class="input" type="password" placeholder="DeepSeek API Key（只存在浏览器 localStorage，不外传）" />
+      <div class="row">
+        <button class="btn ghost" id="saveLLM">保存</button>
+        <span class="hint">没 Key 也能用：自动走本地规则编译，结果完全一致可复现。</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="card hidden" id="step3">
+    <div class="card-head">
+      <h2><span class="num">03</span>分析计划（人工确认闸门）</h2>
+      <span class="hint" id="planEngine"></span>
+    </div>
+    <ol class="plan-list" id="planList"></ol>
+    <div id="confirmGate" class="gate hidden">
+      <label><input type="checkbox" id="confirmDestructive" /> 我确认：上面的“剔除异常点”会删掉数据行，删了什么可回看、可撤回。</label>
+    </div>
+    <div class="row">
+      <button class="btn primary" id="runBtn" disabled>执行计划</button>
+      <span class="hint" id="runHint"></span>
+    </div>
+  </section>
+
+  <section class="card hidden" id="step4">
+    <div class="card-head">
+      <h2><span class="num">04</span>结果：结论 → 步骤 → 原始数据</h2>
+      <span class="hint">点任何一个数字徽章，跳到它的计算步骤</span>
+    </div>
+    <div id="claims" class="claims"></div>
+    <div class="grid-2">
+      <div>
+        <h3 class="sub">步骤时间轴</h3>
+        <ol class="timeline" id="timeline"></ol>
+      </div>
+      <div>
+        <h3 class="sub">图</h3>
+        <div id="chart" class="chart"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card hidden" id="step5">
+    <div class="card-head">
+      <h2><span class="num">05</span>复现与导出</h2>
+      <span class="hint">同一数据 + 同一计划 → 产物哈希逐位一致</span>
+    </div>
+    <div class="row">
+      <button class="btn" id="recheckBtn">重跑一致性校验</button>
+      <button class="btn primary" id="exportBtn">导出复现包（zip）</button>
+      <span class="hint" id="recheckHint"></span>
+    </div>
+    <pre id="hashBox" class="hashbox"></pre>
+  </section>
+</main>
+
+<footer class="foot">
+  <span>ReproLab · 传智杯 AI 创新应用挑战赛（B 组）</span>
+  <span>纯浏览器执行 · 数据不出本机 · 零依赖</span>
+</footer>
+
+<script type="module" src="./src/ui/app.js"></script>
+</body>
+</html>
