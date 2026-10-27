@@ -4,20 +4,12 @@
 import { validatePlan } from './kernel/index.js';
 
 const KEYWORDS = [
-  { op: 'drop_outliers', words: ['异常', '离群', '野值', '剔除', '去掉'] },
-  { op: 'transform_log', words: ['对数', 'log', 'ln', '指数'] },
-  { op: 'correlate', words: ['相关', '关系', '关联', '趋势', '负相关', '正相关'] },
-  { op: 'fit_linear', words: ['拟合', '回归', '斜率', '方程', '线性'] },
-  { op: 'scatter', words: ['图', '画', '可视化', '散点', '绘图', '放进报告'] },
+  { op: 'drop_outliers', words: ['异常', '离群', '野值', '剔除', '去掉', '删掉', 'bug', '噪'] },
+  { op: 'transform_log', words: ['对数', 'log', 'ln', '指数', '倍数'] },
+  { op: 'correlate', words: ['相关', '关系', '关联', '趋势', '负相关', '正相关', '影响', '下降', '降低', '上升', '升高', '越', '跟着'] },
+  { op: 'fit_linear', words: ['拟合', '回归', '斜率', '方程', '线性', '模型', '预测', '拟一条', '拟个', '直线'] },
+  { op: 'scatter', words: ['图', '画', '可视化', '散点', '绘图', '放进报告', '曲线'] },
 ];
-
-export function pickColumns(dataset, question) {
-  const numeric = dataset.columns.filter((c) => c.kind === 'number');
-  const mentioned = numeric.filter((c) => question.includes(c.name));
-  const x = mentioned[0]?.name || numeric[0]?.name;
-  const y = mentioned[1]?.name || mentioned[0]?.name === x ? (mentioned[1]?.name || numeric[1]?.name || numeric[0]?.name) : (mentioned[1]?.name || numeric[1]?.name);
-  return { x, y: y || x };
-}
 
 export function compileByRules(dataset, question) {
   const hits = new Set();
@@ -67,11 +59,11 @@ export function buildClaims(plan, steps) {
     const c = corr.output;
     claims.push({
       id: 'c1',
-      text: `${c.x} 与 ${c.transformY === 'ln' ? 'ln ' : ''}${c.y} 呈${c.strength}${c.direction}（r = {{r}}，n = {{n}}，p = {{p}}）`,
+      text: `${c.x} 与 ${c.transformY === 'ln' ? 'ln ' : ''}${c.y} 呈${c.strength}${c.direction}（r = {{r}}，n = {{n}}，{{pPhrase}}）`,
       refs: [
         { stepId: corr.id, field: 'r', value: c.r },
         { stepId: corr.id, field: 'n', value: c.n },
-        { stepId: corr.id, field: 'p', value: c.p },
+        { stepId: corr.id, field: 'pPhrase', value: c.p < 1e-4 ? 'p < 0.0001' : `p = ${Number(c.p.toFixed(4))}` },
       ],
       verdict: c.significant ? '显著（p < 0.05）' : '不显著（p ≥ 0.05）',
     });
@@ -80,10 +72,11 @@ export function buildClaims(plan, steps) {
     const f = fit.output;
     claims.push({
       id: 'c2',
-      text: `拟合结果：${f.transformY === 'ln' ? 'ln ' : ''}${f.y} = {{intercept}} + {{slope}} × ${f.x}，R² = {{r2}}`,
+      text: `拟合结果：${f.transformY === 'ln' ? 'ln ' : ''}${f.y} = {{intercept}} {{slopeSign}} {{absSlope}} × ${f.x}，R² = {{r2}}`,
       refs: [
-        { stepId: fit.id, field: 'slope', value: f.slope },
         { stepId: fit.id, field: 'intercept', value: f.intercept },
+        { stepId: fit.id, field: 'slopeSign', value: f.slope < 0 ? '−' : '+' },
+        { stepId: fit.id, field: 'absSlope', value: Math.abs(f.slope) },
         { stepId: fit.id, field: 'r2', value: f.r2 },
       ],
       verdict: f.r2 >= 0.8 ? '拟合优度高' : f.r2 >= 0.5 ? '拟合中等' : '拟合较弱',
@@ -110,17 +103,23 @@ export function renderClaim(claim, steps) {
     if (!step) throw new Error(`引用的步骤不存在：${ref.stepId}`);
     const actual = resolveField(step.output, field);
     if (actual === undefined || actual === null) throw new Error(`步骤 ${ref.stepId} 没有字段 ${field}`);
-    return formatNumber(actual);
+    return formatNumber(actual, field);
   });
 }
 
 function resolveField(output, field) {
   if (field === 'count') return output.outliers ? output.outliers.length : undefined;
+  // 派生字段：仍从真实结果算，不允许凭空写
+  if (field === 'slopeSign') return output.slope < 0 ? '−' : '+';
+  if (field === 'absSlope') return Math.abs(output.slope);
+  if (field === 'pPhrase') return output.p < 1e-4 ? 'p < 0.0001' : `p = ${Number(output.p.toFixed(4))}`;
   return output[field];
 }
 
-function formatNumber(v) {
+function formatNumber(v, field) {
   if (typeof v !== 'number') return String(v);
+  // p 值：小于 1e-4 一律写成 < 0.0001，避免显示成 “p = 0”
+  if (field === 'p' && v < 1e-4) return '< 0.0001';
   if (Math.abs(v) !== 0 && (Math.abs(v) < 1e-4 || Math.abs(v) >= 1e6)) return v.toExponential(3);
   return String(Number(v.toFixed(4)));
 }

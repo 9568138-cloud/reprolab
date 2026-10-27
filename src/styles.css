@@ -93,7 +93,7 @@ textarea, .input {
 .timeline li { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: #0f1a34; }
 .timeline li.active { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(77, 163, 255, .35); }
 .timeline .t-head { display: flex; justify-content: space-between; font-size: 13px; }
-.timeline .t-hash { font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; color: var(--muted); margin-top: 4px; }
+.timeline .t-hash { font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; color: #a8b6dd; margin-top: 4px; }
 .chart { border: 1px solid var(--line); border-radius: 12px; padding: 8px; background: #0d1428; }
 .hashbox {
   margin-top: 14px; padding: 12px; border-radius: 10px; background: #0d1428; border: 1px solid var(--line);
@@ -101,3 +101,55 @@ textarea, .input {
 }
 .foot { display: flex; justify-content: space-between; padding: 18px 28px; color: var(--muted); font-size: 12px; border-top: 1px solid var(--line); }
 .hidden { display: none !important; }
+
+/* ---- 顶栏右侧 ---- */
+.topbar-right { display: flex; align-items: center; gap: 10px; }
+.topbar-right .btn { padding: 8px 12px; font-size: 12.5px; }
+
+/* ---- 轻提示，替代 alert ---- */
+.toast {
+  position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
+  max-width: min(680px, 90vw); padding: 12px 18px; border-radius: 12px;
+  background: #172040; border: 1px solid var(--line); color: var(--text);
+  font-size: 13.5px; line-height: 1.5; box-shadow: 0 12px 32px rgba(0, 0, 0, .45);
+  z-index: 50; animation: toast-in .18s ease-out;
+}
+.toast.ok { border-color: #1f6b4a; background: rgba(57, 217, 138, .12); }
+.toast.warn { border-color: #7a5a2a; background: rgba(255, 200, 107, .12); }
+.toast.error { border-color: #7a2f3a; background: rgba(255, 107, 107, .12); }
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+/* ---- 计划 DSL ---- */
+.dsl { margin-top: 14px; border: 1px solid var(--line); border-radius: 10px; background: #0d1428; }
+.dsl summary { padding: 10px 12px; cursor: pointer; font-size: 12.5px; color: var(--muted); }
+.dsl summary:hover { color: var(--text); }
+.dsl pre {
+  margin: 0; padding: 0 14px 12px; font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px; line-height: 1.6; color: #b9d7ff; max-height: 260px; overflow: auto;
+}
+.dsl .row { padding: 0 12px 12px; margin-top: 0; }
+
+/* ---- 结论卡 ---- */
+.claim-foot { display: flex; justify-content: space-between; gap: 12px; margin-top: 6px; }
+.claim .src { font-size: 11.5px; color: #6f7da6; font-family: ui-monospace, Consolas, monospace; }
+.hint.ok { color: var(--ok); }
+.hint.bad { color: var(--warn); }
+
+/* ---- 被删除的行 ---- */
+.dropped-box {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  margin: 0 0 16px; padding: 10px 12px; border: 1px solid #7a2f3a;
+  border-radius: 10px; background: rgba(255, 107, 107, .06); font-size: 12.5px;
+}
+.dropped-title { color: #ffb3b3; font-weight: 600; margin-right: 4px; }
+.chip-danger { border-color: #7a2f3a; color: #ffb3b3; }
+
+/* ---- 时间轴参数行 ---- */
+.timeline .t-params {
+  font-family: ui-monospace, Consolas, monospace; font-size: 11.5px;
+  color: #8fa0cc; margin-top: 4px;
+}
+
+/* ---- 图表说明 ---- */
+.chart-note { margin-top: 8px; font-size: 11.5px; color: var(--muted); text-align: center; }
+

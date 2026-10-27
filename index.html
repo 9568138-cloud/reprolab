@@ -15,7 +15,11 @@
       <p class="tagline">说一句话 → 编译成可审阅的分析计划 → 每条结论都能回溯到计算步骤</p>
     </div>
   </div>
-  <div class="pill" id="statusPill">未载入数据</div>
+  <div class="topbar-right">
+    <button class="btn ghost" id="demoBtn" title="自动跑一遍完整闭环，适合录屏">▶ 一键演示</button>
+    <button class="btn ghost" id="resetBtn" title="清空当前会话">重置</button>
+    <div class="pill" id="statusPill">未载入数据</div>
+  </div>
 </header>
 
 <main>
@@ -50,6 +54,7 @@
     <div class="row">
       <button class="btn primary" id="compileBtn">编译分析计划</button>
       <button class="btn ghost" id="toggleLLM">配置 LLM（可选）</button>
+      <button class="btn ghost" id="askExample" title="填一个示例问题">示例问题</button>
       <span class="hint" id="compileHint"></span>
     </div>
     <div id="llmBox" class="llm-box hidden">
@@ -75,6 +80,11 @@
       <button class="btn primary" id="runBtn" disabled>执行计划</button>
       <span class="hint" id="runHint"></span>
     </div>
+    <details class="dsl">
+      <summary>查看计划 DSL（AI 只能输出这个结构，越界即拒绝执行）</summary>
+      <pre id="planJson"></pre>
+      <div class="row"><button class="btn ghost" id="copyPlan">复制 JSON</button></div>
+    </details>
   </section>
 
   <section class="card hidden" id="step4">
@@ -83,6 +93,7 @@
       <span class="hint">点任何一个数字徽章，跳到它的计算步骤</span>
     </div>
     <div id="claims" class="claims"></div>
+    <div id="droppedBox" class="dropped-box hidden"></div>
     <div class="grid-2">
       <div>
         <h3 class="sub">步骤时间轴</h3>
@@ -114,6 +125,7 @@
   <span>纯浏览器执行 · 数据不出本机 · 零依赖</span>
 </footer>
 
+<div id="toast" class="toast hidden"></div>
 <script type="module" src="./src/ui/app.js"></script>
 </body>
 </html>
