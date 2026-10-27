@@ -1,37 +1,5 @@
-# 依赖
-/node_modules
-.pnp
-.pnp.*
-
-# Next.js 构建产物
-/.next/
-/out/
-/build
-
-# 测试覆盖率
-/coverage
-
-# 数据库文件（可通过 pnpm db:seed 重建，不入库）
-/prisma/*.db
-/prisma/*.db-journal
-
-# 环境变量（严禁提交，防 API Key 泄露）
-.env
-.env.local
-.env*.local
-
-# 系统与编辑器
+node_modules/
 .DS_Store
-Thumbs.db
-*.pem
-.vercel
-
-# 日志
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
-
-# TypeScript
-*.tsbuildinfo
-next-env.d.ts
+*.zip
+*.log
+reprolab-*.zip
