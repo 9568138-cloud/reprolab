@@ -153,3 +153,44 @@ textarea, .input {
 /* ---- 图表说明 ---- */
 .chart-note { margin-top: 8px; font-size: 11.5px; color: var(--muted); text-align: center; }
 
+/* ---- 模式切换 ---- */
+.modes { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.mode {
+  background: transparent; color: var(--muted); border: 0; cursor: pointer;
+  padding: 7px 16px; font-size: 13px; transition: .15s;
+}
+.mode:hover { color: var(--text); }
+.mode.active { background: linear-gradient(135deg, #2f6fed, #4da3ff); color: #fff; font-weight: 600; }
+
+/* ---- 审计 ---- */
+.audit-card { border-color: #2b4a7a; }
+.audit-lead { margin: 0 0 12px; color: var(--muted); font-size: 13.5px; line-height: 1.7; }
+.audit-lead strong { color: var(--text); }
+.audit-lead em { color: var(--accent-2); font-style: normal; }
+.audit-case { margin-top: 14px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: #0d1428; }
+.audit-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.audit-plan { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: #b9d7ff; margin-bottom: 6px; }
+.audit-result { margin-top: 16px; }
+.audit-summary {
+  display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline;
+  padding: 12px 14px; border-radius: 10px; margin-bottom: 12px;
+  border: 1px solid var(--line); background: #0f1a34;
+}
+.audit-summary.ok { border-color: #1f6b4a; background: rgba(57, 217, 138, .08); }
+.audit-summary.bad { border-color: #7a2f3a; background: rgba(255, 107, 107, .07); }
+.verdict-big { font-size: 15px; font-weight: 700; }
+.audit-summary code { font-family: ui-monospace, Consolas, monospace; color: #b9d7ff; }
+.audit-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.audit-table th, .audit-table td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.audit-table th { color: var(--muted); font-weight: 600; font-size: 11.5px; white-space: nowrap; }
+.audit-table td.num { font-family: ui-monospace, Consolas, monospace; text-align: right; white-space: nowrap; }
+.audit-table td.idx { color: var(--muted); width: 28px; }
+.audit-table td.why { color: #8fa0cc; font-size: 11.5px; }
+.audit-row.bad { background: rgba(255, 107, 107, .08); }
+.audit-row.warn { background: rgba(255, 200, 107, .06); }
+.vchip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; border: 1px solid; white-space: nowrap; }
+.vchip.ok { color: #7be0c4; border-color: #1f6b4a; }
+.vchip.bad { color: #ff9b9b; border-color: #7a2f3a; }
+.vchip.warn { color: #ffd27a; border-color: #7a5a2a; }
+
+

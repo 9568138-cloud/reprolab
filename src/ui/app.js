@@ -3,6 +3,7 @@ import { executePlan } from '../kernel/index.js';
 import { compileByRules, compileByLLM, buildClaims, renderClaim } from '../planner.js';
 import { sha256, shortHash } from '../kernel/hash.js';
 import { buildReproducePackage } from '../export/package.js';
+import { auditReport, auditToMarkdown } from '../audit.js';
 import { zipStore } from '../export/zip.js';
 
 const $ = (id) => document.getElementById(id);
@@ -400,3 +401,137 @@ $('resetBtn').addEventListener('click', () => {
 });
 
 setStatus('未载入数据');
+
+// ---------- 模式切换：分析 / 审计 ----------
+const STEP_IDS = ['step1', 'step2', 'step3', 'step4', 'step5'];
+
+function setMode(mode) {
+  document.body.dataset.mode = mode;
+  document.querySelectorAll('#modeSwitch .mode').forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
+  if (mode === 'audit') {
+    STEP_IDS.forEach((id) => show(id, false));
+    show('auditPanel', true);
+    if (!state.dataset) toast('审计需要数据：点「载入示例审计案」会自动带上示例数据', 'warn');
+  } else {
+    show('auditPanel', false);
+    show('step1', true); show('step2', true);
+    show('step3', !!state.plan); show('step4', !!state.run); show('step5', !!state.run);
+  }
+}
+
+$('modeSwitch').addEventListener('click', (e) => {
+  const btn = e.target.closest('.mode');
+  if (btn) setMode(btn.dataset.mode);
+});
+
+// ---------- 审计 ----------
+let auditCase = null;
+
+async function loadAuditCase(data, source = 'JSON') {
+  try {
+    if (!data || !data.plan || !Array.isArray(data.claims)) throw new Error('审计案需要包含 plan 与 claims');
+    auditCase = data;
+    if (!state.dataset) {
+      const csvText = await (await fetch('./sample-data/thermal.csv')).text();
+      const ds = await loadCsv(csvText, '示例 thermal.csv');
+      if (!ds) return;
+    }
+    const ops = data.plan.steps.map((s) => labelOf(s.op)).join(' → ');
+    $('auditCase').innerHTML = `
+      <div class="audit-meta">
+        <span class="chip">报告 <b>${escapeHtml(data.title || '未命名')}</b></span>
+        <span class="chip">结论 <b>${data.claims.length}</b> 条</span>
+        <span class="chip">计划 <b>${data.plan.steps.length}</b> 步</span>
+        <span class="chip">数据集 <b>${state.dataset.rowCount}</b> 行</span>
+      </div>
+      <div class="audit-plan">${escapeHtml(ops)}</div>
+      ${data.note ? `<div class="hint">${escapeHtml(data.note)}</div>` : ''}`;
+    show('auditCase', true);
+    show('auditResult', false);
+    $('auditRun').disabled = false;
+    $('auditHint').textContent = `已载入（${source}），可以开始审计`;
+  } catch (err) {
+    $('auditHint').textContent = '';
+    toast(`审计案载入失败：${err.message}`, 'error');
+  }
+}
+
+$('auditSample').addEventListener('click', async () => {
+  const res = await fetch('./sample-data/audit-case.json');
+  loadAuditCase(await res.json(), '示例');
+});
+$('auditPick').addEventListener('click', () => $('auditFile').click());
+$('auditFile').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  try { loadAuditCase(JSON.parse(await file.text()), file.name); }
+  catch { toast('不是合法的 JSON 文件', 'error'); }
+});
+
+$('auditRun').addEventListener('click', () => runAudit());
+
+async function runAudit() {
+  if (!auditCase) return toast('先载入一份审计案', 'warn');
+  $('auditRun').disabled = true;
+  $('auditHint').textContent = '重算中…';
+  try {
+    const { results, summary } = await auditReport({
+      dataset: state.dataset,
+      plan: auditCase.plan,
+      claims: auditCase.claims,
+      expectedArtifactHash: auditCase.expectedArtifactHash,
+    });
+    renderAudit(results, summary);
+    $('auditHint').textContent = summary.passed ? '全部通过' : '存在对不上的条目';
+    setStatus(`审计完成 · ${summary.total} 条`, true);
+    toast(summary.passed ? '报告全部通过' : `发现 ${summary.mismatch} 处不一致、${summary.unreproducible} 条无法复现`, summary.passed ? 'ok' : 'warn');
+  } catch (err) {
+    toast(`审计失败：${err.message}`, 'error');
+    $('auditHint').textContent = '';
+  } finally {
+    $('auditRun').disabled = false;
+  }
+}
+
+function renderAudit(results, summary) {
+  const chip = { ok: ['通过', 'ok'], mismatch: ['不符', 'bad'], unreproducible: ['无法复现', 'warn'] };
+  const rows = results.map((r, i) => {
+    const [label, kind] = chip[r.verdict];
+    const declared = r.declared === undefined ? '—' : String(r.declared);
+    const actual = r.actual === undefined ? '—' : String(typeof r.actual === 'number' ? Number(r.actual.toFixed(6)) : r.actual);
+    return `<tr class="audit-row ${kind}">
+      <td class="idx">${i + 1}</td>
+      <td>${escapeHtml(r.text)}</td>
+      <td class="num">${declared}</td>
+      <td class="num">${actual}</td>
+      <td><span class="vchip ${kind}">${label}</span></td>
+      <td class="why">${escapeHtml(r.reason || '')}</td>
+    </tr>`;
+  }).join('');
+
+  $('auditResult').innerHTML = `
+    <div class="audit-summary ${summary.passed ? 'ok' : 'bad'}">
+      <span class="verdict-big">${summary.passed ? '✅ 全部通过' : '❌ 存在对不上的结论'}</span>
+      <span class="hint">共 ${summary.total} 条 · 通过 ${summary.ok} · 不符 ${summary.mismatch} · 无法复现 ${summary.unreproducible}</span>
+      <span class="hint">重算产物哈希 <code>${shortHash(summary.artifactHash, 16)}</code>${summary.hashMatches === null ? '' : summary.hashMatches ? '（与报告声明一致）' : '（与报告声明不一致）'}</span>
+    </div>
+    <table class="audit-table">
+      <thead><tr><th>#</th><th>报告里的结论</th><th>报告值</th><th>重算值</th><th>判定</th><th>说明</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="row">
+      <button class="btn ghost" id="auditCopy">复制审计报告（Markdown）</button>
+      <span class="hint">审计只重算、不改数据；每条差异都写明是哪个步骤的哪个字段。</span>
+    </div>`;
+  show('auditResult', true);
+
+  $('auditCopy').addEventListener('click', async () => {
+    const md = auditToMarkdown({ title: auditCase?.title || '报告审计结果', summary, results });
+    try { await navigator.clipboard.writeText(md); toast('审计报告已复制', 'ok'); }
+    catch { toast('复制失败，可手动选中表格', 'warn'); }
+  });
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}

@@ -16,6 +16,10 @@
     </div>
   </div>
   <div class="topbar-right">
+    <nav class="modes" id="modeSwitch">
+      <button class="mode active" data-mode="analyze">分析</button>
+      <button class="mode" data-mode="audit">审计</button>
+    </nav>
     <button class="btn ghost" id="demoBtn" title="自动跑一遍完整闭环，适合录屏">▶ 一键演示</button>
     <button class="btn ghost" id="resetBtn" title="清空当前会话">重置</button>
     <div class="pill" id="statusPill">未载入数据</div>
@@ -23,6 +27,26 @@
 </header>
 
 <main>
+  <section class="card audit-card hidden" id="auditPanel">
+    <div class="card-head">
+      <h2><span class="num">A</span>结论审计</h2>
+      <span class="hint">把报告里的结论逐条重算，告诉你哪条对不上</span>
+    </div>
+    <p class="audit-lead">
+      上传一份<strong>别人的报告</strong>（或者你上个月自己写的），我用同一份数据把每条结论重算一遍：
+      <em>算得对的放行，对不上的标出来，算不出的说明为什么无法复现。</em>
+    </p>
+    <div class="row">
+      <button class="btn primary" id="auditSample">载入示例审计案</button>
+      <input type="file" id="auditFile" accept=".json,application/json" hidden />
+      <button class="btn ghost" id="auditPick">导入审计案 JSON</button>
+      <button class="btn primary" id="auditRun" disabled>开始审计</button>
+      <span class="hint" id="auditHint"></span>
+    </div>
+    <div id="auditCase" class="audit-case hidden"></div>
+    <div id="auditResult" class="audit-result hidden"></div>
+  </section>
+
   <section class="card" id="step1">
     <div class="card-head">
       <h2><span class="num">01</span>数据接入</h2>

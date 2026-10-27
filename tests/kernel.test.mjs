@@ -155,3 +155,59 @@ test('复现包：文件齐全，产物指纹可独立重算', async () => {
   assert.deepEqual(runJson.droppedRows, run.droppedRows);
   assert.ok(pkg.files.find((f) => f.name === 'verify.mjs').text.includes('WHITELIST'), 'verify.mjs 应自带白名单校验');
 });
+
+// ---------- 审计模式 ----------
+import { auditReport, auditToMarkdown, compareValue } from '../src/audit.js';
+
+test('审计：四舍五入差异算通过，人为改数算不符', () => {
+  assert.equal(compareValue(-0.9635, -0.963531).ok, true, '4 位四舍五入应通过');
+  assert.equal(compareValue(2, 2).ok, true);
+  assert.equal(compareValue(3, 2).ok, false);
+  assert.equal(compareValue(-0.9585, -0.963531).ok, false, '改动 0.005 必须被判不符');
+});
+
+test('审计：逐条重算，给出 通过/不符/无法复现 三态', async () => {
+  const ds = toDataset(csv);
+  const plan = compileByRules(ds, '温度和阻值的关系，剔除异常点，出图');
+  const run = await executePlan(plan, ds);
+  const claims = [
+    { id: 'a', text: 'r 一致', stepId: 's3', field: 'r', value: Number(run.steps.find((s) => s.op === 'correlate').output.r.toFixed(4)) },
+    { id: 'b', text: '异常点个数被改', stepId: 's2', field: 'count', value: 99 },
+    { id: 'c', text: '引用了不存在的步骤', stepId: 's99', field: 'r', value: 1 },
+  ];
+  const { results, summary } = await auditReport({ dataset: ds, plan, claims, expectedArtifactHash: run.artifactHash });
+  assert.deepEqual(results.map((r) => r.verdict), ['ok', 'mismatch', 'unreproducible']);
+  assert.equal(summary.ok, 1);
+  assert.equal(summary.mismatch, 1);
+  assert.equal(summary.unreproducible, 1);
+  assert.equal(summary.hashMatches, true);
+  assert.equal(summary.passed, false);
+});
+
+test('审计：声明的产物哈希对不上时整体不通过', async () => {
+  const ds = toDataset(csv);
+  const plan = compileByRules(ds, '温度和阻值的关系');
+  const run = await executePlan(plan, ds);
+  const { summary } = await auditReport({
+    dataset: ds, plan,
+    claims: [{ text: 'r', stepId: 's2', field: 'r', value: Number(run.steps[1].output.r.toFixed(4)) }],
+    expectedArtifactHash: 'deadbeef',
+  });
+  assert.equal(summary.hashMatches, false);
+  assert.equal(summary.passed, false);
+});
+
+test('审计报告：Markdown 里三种判定都在', async () => {
+  const ds = toDataset(csv);
+  const plan = compileByRules(ds, '温度和阻值的关系，剔除异常点');
+  const run = await executePlan(plan, ds);
+  const claims = [
+    { text: '正常条目', stepId: 's2', field: 'removed', value: 99 },
+    { text: '缺步骤', stepId: 's77', field: 'x', value: 1 },
+  ];
+  const { results, summary } = await auditReport({ dataset: ds, plan, claims });
+  const md = auditToMarkdown({ summary, results });
+  assert.ok(md.includes('不符'));
+  assert.ok(md.includes('无法复现'));
+  assert.ok(md.includes('审计结论'));
+});
