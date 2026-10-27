@@ -116,6 +116,27 @@ test('描述统计：删行之后按剩下的行算', async () => {
   assert.equal(desc.stats.n, ds.rowCount - run.droppedRows.length);
 });
 
+test('健壮性：中文列名、空值、单列数据的提示', async () => {
+  const cn = toDataset('温度,阻值\n20,10.1\n22,9.4\n24,9.0\n26,8.5\n28,8.2');
+  assert.deepEqual(cn.columns.map((c) => c.name), ['温度', '阻值']);
+  const run = await executePlan(compileByRules(cn, '温度和阻值的关系，出图'), cn);
+  assert.equal(run.artifactHash.length, 64);
+
+  const withNull = toDataset('temp,res\n20,10.1\n22,\n24,9.0\n26,8.5');
+  assert.equal(withNull.rowCount, 4);
+  const run2 = await executePlan(compileByRules(withNull, '相关性'), withNull);
+  const corr = run2.steps.find((s) => s.op === 'correlate');
+  assert.equal(corr.output.n, 3, '空值行不参与相关性计算');
+
+  const single = toDataset('x\n1\n2\n3');
+  assert.throws(() => compileByRules(single, '相关性'), /至少需要两列数值/);
+});
+
+test('健壮性：空文件与只有表头都会给出可读错误', () => {
+  assert.throws(() => toDataset(''), /表头和一行数据/);
+  assert.throws(() => toDataset('a,b'), /表头和一行数据/);
+});
+
 test('复现包：文件齐全，产物指纹可独立重算', async () => {
   const ds = toDataset(csv);
   const plan = compileByRules(ds, '温度和阻值的关系，剔除异常点，出图');

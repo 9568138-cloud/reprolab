@@ -49,6 +49,9 @@ async function loadCsv(text, label = 'CSV') {
     show('datasetInfo', true);
     setStatus(`已载入 ${dataset.rowCount} 行 · 原始层只读`, true);
     show('step3', false); show('step4', false); show('step5', false);
+    if (numeric.length < 2) {
+      toast(`只有 ${numeric.length} 列数值：能出描述统计，但做不了相关/拟合`, 'warn');
+    }
     return dataset;
   } catch (err) {
     toast(`解析失败：${err.message}`, 'error');

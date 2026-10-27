@@ -79,7 +79,7 @@ reprolab/
 │  │  └─ package.js         # 复现包：数据/计划/结果/报告/清单 + 自带 verify.mjs 校验脚本
 │  └─ ui/app.js             # 工作台交互与渲染（含一键演示、内联提示、DSL 视图、图注）
 ├─ sample-data/thermal.csv  # 示例数据（含 2 个离群点）
-├─ tests/kernel.test.mjs    # 13 条单测（node --test 或直接 node 运行）
+├─ tests/kernel.test.mjs    # 15 条单测（node --test 或直接 node 运行）
 ├─ demo/视频分镜.md          # 5–8 分钟演示视频的分镜与口播要点
 ├─ docs/                    # 界面截图、技术文档、提交清单
 └─ prompts/                 # AI 协同过程记录（8 轮迭代 + 4 张真界面截图）
@@ -89,7 +89,7 @@ reprolab/
 
 ```bash
 node tests/kernel.test.mjs
-# 13 tests / 13 pass：解析、白名单、破坏性算子确认、可复现哈希、异常点、相关性、
+# 15 tests / 15 pass：解析、白名单、破坏性算子确认、可复现哈希、异常点、相关性、
 #                     结论溯源、删除清单一致性、删行后统计口径、复现包指纹可重算
 ```
 
@@ -115,5 +115,6 @@ node verify.mjs
 ## 已知边界（MVP）
 
 - 支持 ≤5 万行 CSV；6 个算子；单用户、单文件；
+- 实测 5 万行 × 2 列：解析 22 ms / 执行 80 ms / 打包 3 ms（Node 24，本机），界面不卡；
 - 不做任意代码执行、不做云端存储、不做协同编辑；
 - LLM 编译为可选增强：不配 Key 也能完整演示，且规则编译结果同样可复现。
