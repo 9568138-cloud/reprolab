@@ -1,0 +1,82 @@
+{
+  "title": "鸢尾花数据实验报告 · 期末版",
+  "note": "这份报告不是 ReproLab 导出的，是同学手写并抄进文档的条目；其中两条有问题。",
+  "plan": {
+    "version": 1,
+    "question": "不同物种的花瓣尺寸差异，以及花瓣长宽的相关性",
+    "engine": "options",
+    "steps": [
+      {
+        "id": "s1",
+        "op": "describe",
+        "params": {
+          "column": "petal_length_cm"
+        }
+      },
+      {
+        "id": "s2",
+        "op": "group_summary",
+        "params": {
+          "groupBy": "species",
+          "column": "petal_length_cm"
+        }
+      },
+      {
+        "id": "s3",
+        "op": "ttest",
+        "params": {
+          "groupBy": "species",
+          "column": "petal_length_cm",
+          "groupA": "setosa",
+          "groupB": "versicolor"
+        }
+      },
+      {
+        "id": "s4",
+        "op": "correlate",
+        "params": {
+          "x": "petal_length_cm",
+          "y": "petal_width_cm"
+        }
+      }
+    ]
+  },
+  "claims": [
+    {
+      "id": "c1",
+      "text": "花瓣长与花瓣宽强正相关（r = 0.9629）",
+      "stepId": "s4",
+      "field": "r",
+      "value": 0.9629
+    },
+    {
+      "id": "c2",
+      "text": "三个物种各 50 个样本",
+      "stepId": "s2",
+      "field": "groupCount",
+      "value": 3
+    },
+    {
+      "id": "c3",
+      "text": "setosa 与 versicolor 的花瓣长均值差 2.798 cm",
+      "stepId": "s3",
+      "field": "diff",
+      "value": -2.798
+    },
+    {
+      "id": "c4",
+      "text": "数据共分了 4 个物种组",
+      "stepId": "s2",
+      "field": "groupCount",
+      "value": 4
+    },
+    {
+      "id": "c5",
+      "text": "全样本花瓣长度均值 3.76 cm（见附录 B）",
+      "stepId": "s9",
+      "field": "mean",
+      "value": 3.76
+    }
+  ],
+  "expectedArtifactHash": "0a79b044d7924f054916b3b9e8c83f2bd4752090d21ccd177cd0566053547b32"
+}

@@ -20,7 +20,6 @@
       <button class="mode active" data-mode="analyze">分析</button>
       <button class="mode" data-mode="audit">审计</button>
     </nav>
-    <button class="btn ghost" id="demoBtn" title="自动跑一遍完整闭环，适合录屏">▶ 一键演示</button>
     <button class="btn ghost" id="resetBtn" title="清空当前会话">重置</button>
     <div class="pill" id="statusPill">未载入数据</div>
   </div>
@@ -34,7 +33,7 @@
       <b>产物哈希逐位一致</b>。别人写的报告，也能逐条审。
     </p>
     <div class="hero-actions">
-      <button class="btn primary" id="heroAnalyze">开始分析（载入示例）</button>
+      <button class="btn primary" id="heroStart">从一份 CSV 开始</button>
       <button class="btn" id="heroAudit">去审计一份报告</button>
       <span class="hint">零依赖 · 断网可跑 · 数据不出本机 · 12 个白名单算子</span>
     </div>
@@ -48,11 +47,11 @@
     <p class="audit-lead">
       上传一份<strong>别人的报告</strong>（或者你上个月自己写的），我用同一份数据把每条结论重算一遍：
       <em>算得对的放行，对不上的标出来，算不出的说明为什么无法复现。</em>
+      需要两样东西：<b>上面载入的原始数据</b> + <b>一份审计案 JSON</b>（格式见 README）。
     </p>
     <div class="row">
-      <button class="btn primary" id="auditSample">载入示例审计案</button>
       <input type="file" id="auditFile" accept=".json,application/json" hidden />
-      <button class="btn ghost" id="auditPick">导入审计案 JSON</button>
+      <button class="btn" id="auditPick">导入审计案 JSON</button>
       <button class="btn primary" id="auditRun" disabled>开始审计</button>
       <span class="hint" id="auditHint"></span>
     </div>
@@ -72,11 +71,10 @@
         <span>或把文件拖到这里</span>
       </label>
       <div>
-        <textarea id="pasteInput" rows="6" placeholder="也可以直接粘贴 CSV 文本，例如：&#10;temp_c,resistance_kohm&#10;20,10.02&#10;22,9.41"></textarea>
+        <textarea id="pasteInput" rows="6" placeholder="也可以直接粘贴 CSV 文本，第一行是表头，例如：&#10;group,value&#10;A,10.2&#10;B,20.1"></textarea>
         <div class="row">
-          <button class="btn ghost" id="loadSample">载入示例（热敏电阻）</button>
-          <button class="btn ghost" id="loadBattery">载入示例（电池两组）</button>
           <button class="btn" id="loadPaste">导入粘贴内容</button>
+          <span class="hint">支持自定义数据；仓库里的 sample-data 是公开真实数据集，可自行下载导入</span>
         </div>
       </div>
     </div>
@@ -108,10 +106,9 @@
     </div>
 
     <div id="askText" class="hidden">
-      <input id="question" class="input" placeholder="例：这组热敏电阻数据，温度升高是不是真的让阻值下降？有没有要去掉的异常点？帮我出一张能放进报告的图。" />
+      <input id="question" class="input" placeholder="例：petal_length_cm 和 petal_width_cm 是什么关系？setosa 和 versicolor 的花瓣长差异显著吗？有缺失值吗？" />
       <div class="row">
         <button class="btn primary" id="compileBtn">编译分析计划</button>
-        <button class="btn ghost" id="askExample" title="填一个示例问题">示例问题</button>
         <span class="hint" id="compileHint"></span>
       </div>
     </div>

@@ -15,22 +15,22 @@
 
 ```bash
 node serve.mjs          # 打开后点右上角「审计」
-# 1) 载入示例审计案（自带一份"别人的报告"：6 条结论，其中 1 条数字被改过、1 条引用了不存在的步骤）
-# 2) 点「开始审计」
-# 3) 结果：4 条通过 / 1 条不符（报告写 3 个异常点，重算只有 2 个）/ 1 条无法复现（引用的步骤不存在）
+# 1) 在「01 数据接入」里载入这份报告对应的原始 CSV（例如 sample-data/iris.csv）
+# 2) 点「导入审计案 JSON」，选 tests/fixtures/audit-case.json（一份 5 条结论的报告，其中 1 条数字被改过、1 条引用了不存在的步骤）
+# 3) 点「开始审计」：得到 3 通过 / 1 不符 / 1 无法复现
 ```
 
 审计案是一份 JSON，结构极简：
 
 ```json
 {
-  "title": "某实验报告 v2",
+  "title": "鸢尾花数据实验报告",
   "plan":  { "version": 1, "steps": [ ... ] },      // 这份报告当初用的分析计划
   "claims": [
-    { "text": "温度与阻值呈强负相关（r = -0.9635）", "stepId": "s3", "field": "r", "value": -0.9635 },
-    { "text": "本次共检出 3 个异常点", "stepId": "s2", "field": "count", "value": 3 }
+    { "text": "花瓣长宽强正相关（r = 0.9629）", "stepId": "s4", "field": "r", "value": 0.9629 },
+    { "text": "数据共分了 4 个物种组", "stepId": "s2", "field": "groupCount", "value": 4 }
   ],
-  "expectedArtifactHash": "af341857…"              // 可选：报告声明的产物哈希
+  "expectedArtifactHash": "0a79b044…"              // 可选：报告声明的产物哈希
 }
 ```
 
@@ -40,10 +40,10 @@ node serve.mjs          # 打开后点右上角「审计」
 
 ```bash
 # 审计一份报告（有不通过时退出码 1，可直接进 CI）
-node cli.mjs audit sample-data/audit-case.json --data sample-data/thermal.csv
+node cli.mjs audit tests/fixtures/audit-case.json --data sample-data/iris.csv
 
 # 只重算产物哈希（给了 data + plan 就能算出该计划的指纹）
-node cli.mjs check sample-data/thermal.csv plan.json
+node cli.mjs check sample-data/iris.csv plan.json
 ```
 
 ## 提需求：点选 或 写一句话
@@ -57,7 +57,20 @@ node cli.mjs check sample-data/thermal.csv plan.json
 
 点选模式生成的是同一套 DSL，同样过白名单校验、同样可复现；计划卡上会标明来源：「点选生成（没有 AI 参与，完全确定）」。
 
-![点选需求](docs/ui-08-options.png)
+![点选需求](docs/ui-02-options.png)
+
+## 示例数据（全部是公开真实数据集）
+
+`sample-data` 里四份 CSV 都来自公开数据集仓库（Rdatasets 镜像，即 R 内置数据集），**没有一个数字是编的**：
+
+| 文件 | 来源 | 行数 | 能演示什么 |
+| :-- | :-- | --: | :-- |
+| iris.csv | R 内置 iris（Fisher 1936 / UCI 收录） | 150 | 分组汇总、两组 t 检验、相关、直方图 |
+| faithful.csv | R 内置 faithful（黄石老忠实泉） | 272 | 相关、直方图、回归 |
+| airpassengers.csv | R 内置 AirPassengers（Box & Jenkins 经典序列） | 144 | 时间趋势、按月分组 |
+| airquality.csv | R 内置 airquality（1973 纽约空气质量） | 153 | **缺失值**（Ozone 37 个 NA）、相关、分组 |
+
+来源、许可与列名映射写在 [sample-data/README.md](sample-data/README.md)；原始文件可到数据源逐行核对。想用自己的数据，把 CSV 拖进界面即可。
 
 ## 快速开始（10 分钟复现）
 
@@ -69,32 +82,29 @@ node --version
 node serve.mjs
 # → http://127.0.0.1:5173
 
-# 3) 浏览器打开后，两条路任选：
-#    A. 点右上角「▶ 一键演示」——自动走完 数据→提问→计划→确认→执行→重跑校验，约 8 秒；
-#    B. 手动：点「载入示例（热敏电阻）」→ 填问题（或点「示例问题」）→ 编译分析计划
-#       → 勾选确认「剔除异常点」→ 执行 → 点结论上的数字徽章回溯步骤
-#       → 「重跑一致性校验」看两次产物哈希是否一致 → 「导出复现包」拿 zip
+# 3) 浏览器打开后：
+#    把 sample-data/iris.csv 拖进「01 数据接入」（或粘贴 CSV）
+#    → 02 选意图（如 分组汇总 + 两组比较）或写一句话 → 生成计划
+#    → 03 勾选确认「剔除异常点」→ 执行
+#    → 04 点结论卡上的数字徽章，跳到对应计算步骤
+#    → 05 重跑一致性校验（两次产物哈希一致）→ 导出复现包 zip
 ```
 
 零依赖：没有 `npm install`，没有构建产物，断网也能跑（LLM 可选，不配 Key 走本地规则编译）。
 
 ## 界面
 
-| 数据接入 | 分析计划（含人工确认闸门） |
+| 首屏 | 点选需求（可多选）+ 选列 |
 | :--: | :--: |
-| ![首页](docs/ui-01-home.png) | ![计划](docs/ui-02-plan.png) |
+| ![首页](docs/ui-01-home.png) | ![点选](docs/ui-02-options.png) |
 
-| 结论 → 步骤溯源 | 时间轴 + 散点图（红圈＝被剔除行） |
+| 分析计划（破坏性步骤需人工确认） | 结论 → 步骤 → 图（分组均值柱状图） |
 | :--: | :--: |
-| ![结果](docs/ui-03-results.png) | ![图表](docs/ui-04-chart.png) |
-
-| 电池两组：分组均值柱状图 | |
-| :--: | :-- |
-| ![电池](docs/ui-07-battery.png) | 一句话同时点亮 缺失盘点 / 分组汇总 / 两组 t 检验 |
+| ![计划](docs/ui-03-plan.png) | ![结果](docs/ui-04-results.png) |
 
 | 审计模式：报告里的结论逐条重算 | |
 | :--: | :-- |
-| ![审计](docs/ui-06-audit.png) | 4 通过 / 1 不符 / 1 无法复现，差异写明是哪个步骤的哪个字段 |
+| ![审计](docs/ui-05-audit.png) | 3 通过 / 1 不符（报告写 4 组，重算 3 组）/ 1 无法复现（引用了不存在的步骤） |
 
 ## 核心闭环
 
@@ -138,14 +148,18 @@ reprolab/
 │  ├─ export/
 │  │  ├─ zip.js             # 最小 ZIP 写入器（store，无依赖）
 │  │  └─ package.js         # 复现包：数据/计划/结果/报告/清单 + 自带 verify.mjs 校验脚本
-│  └─ ui/app.js             # 工作台交互与渲染（含一键演示、内联提示、DSL 视图、图注）
-├─ sample-data/thermal.csv  # 示例数据（热敏电阻，含 2 个离群点）
-├─ sample-data/battery.csv  # 示例数据（电池两组 A/B，含 4 处缺失，用来演示分组/t 检验）
-├─ sample-data/audit-case.json # 审计演示案（6 条结论，1 条被改、1 条缺步骤）
-├─ tests/kernel.test.mjs    # 24 条单测（node --test 或直接 node 运行）
+│  └─ ui/app.js             # 工作台交互与渲染（点选/一句话、内联提示、DSL 视图、图注）
+├─ sample-data/             # 4 份公开真实数据集（见 sample-data/README.md 的来源与列名映射）
+│  ├─ iris.csv              #   150 行 · 4 数值列 + 物种（3 组）
+│  ├─ faithful.csv          #   272 行 · 间歇泉喷发时长与等待时间
+│  ├─ airpassengers.csv     #   144 行 · 1949–1960 月度客运量
+│  └─ airquality.csv        #   153 行 · 纽约空气质量，含 37 个缺失值
+├─ tests/
+│  ├─ kernel.test.mjs       # 24 条单测（node --test 或直接 node 运行）
+│  └─ fixtures/audit-case.json # 审计测试用"一份报告"（5 条结论，1 条被改、1 条缺步骤）
 ├─ demo/视频分镜.md          # 5–8 分钟演示视频的分镜与口播要点
 ├─ docs/                    # 界面截图、技术文档、提交清单
-└─ prompts/                 # AI 协同过程记录（8 轮迭代 + 4 张真界面截图）
+└─ prompts/                 # AI 协同过程记录（11 轮迭代 + 4 张真界面截图）
 ```
 
 ## 测试

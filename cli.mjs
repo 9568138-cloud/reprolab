@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 命令行：不打开浏览器也能审计/复现。适合 CI 和文档里的"一条命令验真伪"。
 //
-//   node cli.mjs audit <审计案.json> [--data <data.csv>] [--json]
+//   node cli.mjs audit <审计案.json> --data <data.csv> [--json]
 //   node cli.mjs verify <复现包目录>          # 跑包里的 verify.mjs
 //   node cli.mjs check <data.csv> <plan.json> # 只重算产物哈希
 //

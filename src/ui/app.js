@@ -9,7 +9,6 @@ import { zipStore } from '../export/zip.js';
 const $ = (id) => document.getElementById(id);
 const state = { rawCsv: '', dataset: null, plan: null, run: null, claims: [], needsConfirm: false, demo: false };
 
-const EXAMPLE_QUESTION = '温度升高是不是真的让阻值下降？先把异常点剔掉，再算相关性、拟一条线，最后出一张能放进报告的图。';
 
 // ---------- 基础交互 ----------
 let toastTimer = null;
@@ -79,21 +78,7 @@ $('loadPaste').addEventListener('click', () => {
   if (!text) return toast('先粘贴 CSV 内容', 'warn');
   loadCsv(text, '粘贴');
 });
-$('loadSample').addEventListener('click', async () => {
-  const res = await fetch('./sample-data/thermal.csv');
-  loadCsv(await res.text(), '示例 thermal.csv');
-});
-$('loadBattery').addEventListener('click', async () => {
-  const res = await fetch('./sample-data/battery.csv');
-  const ds = await loadCsv(await res.text(), '示例 battery.csv');
-  if (ds) {
-    $('question').value = 'A 组和 B 组的容量有没有显著差异？各组分别是什么水平？有缺失值吗？';
-    toast('已载入电池数据：这份有两组（A/B），适合演示分组与 t 检验', 'ok');
-  }
-});
-
 // ---------- 02 编译计划 ----------
-$('askExample').addEventListener('click', () => { $('question').value = EXAMPLE_QUESTION; $('question').focus(); });
 $('question').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); compilePlan(); }
 });
@@ -229,7 +214,7 @@ function buildPlanFromOptions() {
 $('compileBtn').addEventListener('click', () => compilePlan());
 
 async function compilePlan() {
-  if (!state.dataset) return toast('先载入数据（可以点「载入示例」）', 'warn');
+  if (!state.dataset) return toast('先在「01 数据接入」里上传或粘贴 CSV', 'warn');
   const question = $('question').value.trim();
   if (!question) return toast('先写一句你想问的问题', 'warn');
   const key = localStorage.getItem('reprolab.llmKey') || '';
@@ -544,44 +529,7 @@ $('exportBtn').addEventListener('click', async () => {
   toast(`复现包已导出（${pkg.files.length} 个文件，含 verify.mjs）`, 'ok');
 });
 
-// ---------- 一键演示 / 重置 ----------
-$('demoBtn').addEventListener('click', async () => {
-  if (state.demo) return;
-  setMode('analyze');
-  state.demo = true;
-  $('demoBtn').disabled = true;
-  try {
-    setStatus('演示中…', true);
-    switchAskTab('options');
-    await loadCsv(await (await fetch('./sample-data/thermal.csv')).text(), '示例 thermal.csv');
-    await sleep(400);
-    // 点选演示：四个意图一次点亮
-    selectedOps.clear();
-    ['correlate', 'drop_outliers', 'fit_linear', 'scatter'].forEach((op) => selectedOps.add(op));
-    renderIntentChips();
-    await sleep(900);
-    generateFromOptions();
-    await sleep(800);
-    if (state.needsConfirm) {
-      $('confirmDestructive').checked = true;
-      syncRunButton();
-      toast('破坏性步骤 → 必须人工勾选确认', 'warn');
-      await sleep(900);
-    }
-    await runPlan();
-    await sleep(900);
-    await recheck();
-    await sleep(600);
-    setStatus('演示完成 · 全程可回溯', true);
-    toast('演示完成：点选需求 → 计划 → 确认 → 执行 → 校验', 'ok');
-  } catch (err) {
-    toast(`演示中断：${err.message}`, 'error');
-  } finally {
-    state.demo = false;
-    $('demoBtn').disabled = false;
-  }
-});
-
+// ---------- 重置 ----------
 $('resetBtn').addEventListener('click', () => {
   state.rawCsv = ''; state.dataset = null; state.plan = null; state.run = null; state.claims = [];
   $('pasteInput').value = '';
@@ -612,9 +560,9 @@ function setMode(mode) {
   document.querySelectorAll('#modeSwitch .mode').forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
   show('hero', mode !== 'audit');
   if (mode === 'audit') {
-    STEP_IDS.forEach((id) => show(id, false));
+    show('step1', true); ['step2','step3','step4','step5'].forEach((id) => show(id, false));
     show('auditPanel', true);
-    if (!state.dataset) toast('审计需要数据：点「载入示例审计案」会自动带上示例数据', 'warn');
+    if (!state.dataset) toast('审计需要数据：先在「01 数据接入」里载入这份报告对应的 CSV', 'warn');
   } else {
     show('auditPanel', false);
     show('step1', true); show('step2', true);
@@ -627,19 +575,14 @@ $('modeSwitch').addEventListener('click', (e) => {
   if (btn) setMode(btn.dataset.mode);
 });
 
-$('heroAnalyze').addEventListener('click', async () => {
-  const res = await fetch('./sample-data/thermal.csv');
-  await loadCsv(await res.text(), '示例 thermal.csv');
-  $('question').value = EXAMPLE_QUESTION;
-  $('step2').scrollIntoView({ behavior: 'smooth', block: 'start' });
-  toast('已载入示例，点「编译分析计划」开始', 'ok');
+$('heroStart').addEventListener('click', () => {
+  $('step1').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  $('fileInput').click();
 });
 
-$('heroAudit').addEventListener('click', async () => {
+$('heroAudit').addEventListener('click', () => {
   setMode('audit');
-  const res = await fetch('./sample-data/audit-case.json');
-  await loadAuditCase(await res.json(), '示例');
-  $('auditRun').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  $('auditPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
 });
 
 // ---------- 审计 ----------
@@ -650,9 +593,9 @@ async function loadAuditCase(data, source = 'JSON') {
     if (!data || !data.plan || !Array.isArray(data.claims)) throw new Error('审计案需要包含 plan 与 claims');
     auditCase = data;
     if (!state.dataset) {
-      const csvText = await (await fetch('./sample-data/thermal.csv')).text();
-      const ds = await loadCsv(csvText, '示例 thermal.csv');
-      if (!ds) return;
+      $('auditHint').textContent = '';
+      toast('先在上面「数据接入」里载入这份报告对应的 CSV', 'warn');
+      return;
     }
     const ops = data.plan.steps.map((s) => labelOf(s.op)).join(' → ');
     $('auditCase').innerHTML = `
@@ -674,11 +617,10 @@ async function loadAuditCase(data, source = 'JSON') {
   }
 }
 
-$('auditSample').addEventListener('click', async () => {
-  const res = await fetch('./sample-data/audit-case.json');
-  loadAuditCase(await res.json(), '示例');
+$('auditPick').addEventListener('click', () => {
+  if (!state.dataset) return toast('先在「数据接入」载入这份报告对应的 CSV', 'warn');
+  $('auditFile').click();
 });
-$('auditPick').addEventListener('click', () => $('auditFile').click());
 $('auditFile').addEventListener('change', async (e) => {
   const file = e.target.files?.[0];
   if (!file) return;

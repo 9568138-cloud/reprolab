@@ -24,6 +24,8 @@ export function parseCsv(text) {
 }
 
 /** CSV → { columns: [{name, index, kind}], rows: [[...raw]] }，全部保留原始字符串 */
+const MISSING_TOKENS = new Set(['', 'NA', 'NaN', 'null', 'NULL', 'N/A', '-', 'None']);
+
 export function toDataset(text) {
   // 允许注释行（# 开头），方便在示例数据里写说明
   const cleaned = text
@@ -34,7 +36,8 @@ export function toDataset(text) {
   const rows = parseCsv(cleaned);
   if (rows.length < 2) throw new Error('CSV 至少需要表头和一行数据');
   const header = rows[0].map((h, i) => (h.trim() || `col_${i + 1}`));
-  const body = rows.slice(1);
+  // 把各种缺失标记统一成空串，后面所有算子都按「缺失」处理，不会被误当成 0 或字符串
+  const body = rows.slice(1).map((r) => r.map((v) => (MISSING_TOKENS.has(String(v).trim()) ? '' : v)));
   const columns = header.map((name, index) => {
     const sample = body.slice(0, 50).map((r) => r[index]).filter((v) => v !== undefined && v !== '');
     const numeric = sample.length > 0 && sample.every((v) => Number.isFinite(Number(v)));
