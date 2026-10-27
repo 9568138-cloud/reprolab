@@ -2,8 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { toDataset } from '../src/kernel/csv.js';
-import { executePlan, validatePlan, PlanError } from '../src/kernel/index.js';
+import { executePlan, validatePlan, PlanError, canonicalArtifact } from '../src/kernel/index.js';
 import { compileByRules, buildClaims, renderClaim } from '../src/planner.js';
+import { sha256, stableStringify } from '../src/kernel/hash.js';
+import { buildReproducePackage } from '../src/export/package.js';
 
 const csv = readFileSync(new URL('../sample-data/thermal.csv', import.meta.url), 'utf8');
 
@@ -85,4 +87,50 @@ test('结论绑定真实数字', async () => {
   const claims = buildClaims(plan, run.steps);
   const text = renderClaim(claims[0], run.steps);
   assert.ok(/r = -0\.\d+/.test(text) || /r = -1/.test(text), `实际：${text}`);
+});
+
+test('剔除清单：删掉的行号与记录一致，且后续步骤只用剩下的行', async () => {
+  const ds = toDataset(csv);
+  const plan = compileByRules(ds, '温度与阻值的关系，有异常点就剔除');
+  const run = await executePlan(plan, ds);
+  const out = run.steps.find((s) => s.op === 'drop_outliers');
+  assert.equal(run.droppedRows.length, out.output.removed);
+  assert.deepEqual([...run.droppedRows].sort((a, b) => a - b), [...out.output.outliers.map((o) => o.row)].sort((a, b) => a - b));
+  const corr = run.steps.find((s) => s.op === 'correlate');
+  assert.equal(corr.output.n, ds.rowCount - run.droppedRows.length, '相关性样本数应等于总行数减被删行数');
+});
+
+test('描述统计：删行之后按剩下的行算', async () => {
+  const ds = toDataset(csv);
+  const plan = {
+    version: 1,
+    question: '先删后描述',
+    steps: [
+      { id: 's1', op: 'drop_outliers', params: { column: 'resistance_kohm', k: 1.5, confirm: true } },
+      { id: 's2', op: 'describe', params: { column: 'resistance_kohm' } },
+    ],
+  };
+  const run = await executePlan(plan, ds);
+  const desc = run.steps[1].output;
+  assert.equal(desc.rowsUsed, ds.rowCount - run.droppedRows.length);
+  assert.equal(desc.stats.n, ds.rowCount - run.droppedRows.length);
+});
+
+test('复现包：文件齐全，产物指纹可独立重算', async () => {
+  const ds = toDataset(csv);
+  const plan = compileByRules(ds, '温度和阻值的关系，剔除异常点，出图');
+  const run = await executePlan(plan, ds);
+  const claims = buildClaims(plan, run.steps);
+  const pkg = await buildReproducePackage({ rawCsv: csv, dataset: ds, plan, run, claims, meta: {} });
+  const names = pkg.files.map((f) => f.name);
+  for (const need of ['data.csv', 'plan.json', 'run.json', 'meta.json', 'report.md', 'verify.mjs']) {
+    assert.ok(names.includes(need), `复现包缺少 ${need}`);
+  }
+  const recomputed = await sha256(stableStringify(canonicalArtifact(plan, run.steps, run.droppedRows)));
+  assert.equal(recomputed, run.artifactHash, '复现包里的产物哈希必须能用 plan+run 重算出来');
+  assert.equal(pkg.dataHash, await sha256(csv), '数据哈希必须等于原始 CSV 的 SHA-256');
+  const runJson = JSON.parse(pkg.files.find((f) => f.name === 'run.json').text);
+  assert.equal(runJson.artifactHash, run.artifactHash);
+  assert.deepEqual(runJson.droppedRows, run.droppedRows);
+  assert.ok(pkg.files.find((f) => f.name === 'verify.mjs').text.includes('WHITELIST'), 'verify.mjs 应自带白名单校验');
 });

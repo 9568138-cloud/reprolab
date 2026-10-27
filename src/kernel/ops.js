@@ -9,9 +9,11 @@ export const OPERATORS = {
   describe: {
     label: '描述统计',
     params: { column: 'string' },
-    run({ dataset }, { column }) {
-      const stats = describe(numericValues(dataset, column));
-      return { kind: 'stats', column, stats };
+    run({ dataset, droppedRows }, { column }) {
+      // 若前面删过行，描述统计看到的是删除后的数据（与后续步骤口径一致）
+      const rows = maskRows(dataset, droppedRows);
+      const stats = describe(numericValues({ ...dataset, rows }, column));
+      return { kind: 'stats', column, stats, rowsUsed: rows.length };
     },
   },
 

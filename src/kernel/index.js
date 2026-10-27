@@ -48,6 +48,19 @@ export function validatePlan(plan, dataset) {
   return true;
 }
 
+/** 产物指纹的唯一口径：导出、复跑校验、复现包自校验都用这个函数 */
+export function canonicalArtifact(plan, steps, droppedRows) {
+  return {
+    plan: {
+      version: plan.version,
+      question: plan.question || '',
+      steps: plan.steps.map((s) => ({ id: s.id, op: s.op, params: s.params || {} })),
+    },
+    outputs: steps.map((s) => ({ id: s.id, op: s.op, output: s.output })),
+    droppedRows: droppedRows || [],
+  };
+}
+
 /** 执行计划：每步都留 输入哈希 / 输出哈希 / 耗时，供溯源与重跑比对 */
 export async function executePlan(plan, dataset) {
   validatePlan(plan, dataset);
@@ -80,13 +93,9 @@ export async function executePlan(plan, dataset) {
     inputHashes.push(inputHash);
   }
 
-  const artifact = {
-    plan: { version: plan.version, question: plan.question || '', steps: plan.steps.map((s) => ({ id: s.id, op: s.op, params: s.params || {} })) },
-    outputs: steps.map((s) => ({ id: s.id, op: s.op, output: s.output })),
-    droppedRows: state.droppedRows,
-  };
+  const artifact = canonicalArtifact(plan, steps, state.droppedRows);
   const artifactHash = await sha256(stableStringify(artifact));
-  return { steps, artifact, artifactHash };
+  return { steps, artifact, artifactHash, droppedRows: state.droppedRows };
 }
 
 function snapshot(state) {
