@@ -353,6 +353,7 @@ $('exportBtn').addEventListener('click', async () => {
 // ---------- 一键演示 / 重置 ----------
 $('demoBtn').addEventListener('click', async () => {
   if (state.demo) return;
+  setMode('analyze');
   state.demo = true;
   $('demoBtn').disabled = true;
   try {
