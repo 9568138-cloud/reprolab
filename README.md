@@ -65,6 +65,10 @@ node serve.mjs
 | :--: | :--: |
 | ![结果](docs/ui-03-results.png) | ![图表](docs/ui-04-chart.png) |
 
+| 电池两组：分组均值柱状图 | |
+| :--: | :-- |
+| ![电池](docs/ui-07-battery.png) | 一句话同时点亮 缺失盘点 / 分组汇总 / 两组 t 检验 |
+
 | 审计模式：报告里的结论逐条重算 | |
 | :--: | :-- |
 | ![审计](docs/ui-06-audit.png) | 4 通过 / 1 不符 / 1 无法复现，差异写明是哪个步骤的哪个字段 |
@@ -87,7 +91,7 @@ node serve.mjs
 
 ## 三个关键设计决策
 
-1. **AI 只能编译计划，不能写代码**：模型输出被限制为 6 个白名单算子的 JSON DSL（`describe / drop_outliers / transform_log / correlate / fit_linear / scatter`），代码由本地实现渲染 → 确定性、无代码执行风险、换模型结果不变。
+1. **AI 只能编译计划，不能写代码**：模型输出被限制为 12 个白名单算子的 JSON DSL（`describe / drop_outliers / transform_log / correlate / fit_linear / scatter / group_summary / ttest / normalize / trend / histogram / missing_report`），代码由本地实现渲染 → 确定性、无代码执行风险、换模型结果不变。
 2. **执行在浏览器内**：纯前端计算，数据不出本机；没有服务端执行用户代码，也就没有沙箱逃逸面。
 3. **结论必须绑定统计量**：结论文本用受限模板，占位符（如 `{{r}}`）必须能在执行结果里找到真实字段，否则 `renderClaim` 直接抛错 → 从机制上杜绝“AI 编数字”。
 
@@ -105,15 +109,16 @@ reprolab/
 │  │  ├─ hash.js            # 稳定序列化 + SHA-256（浏览器/Node 同结果）
 │  │  ├─ csv.js             # CSV 解析 + 列类型推断
 │  │  ├─ stats.js           # 描述统计 / 相关 / 最小二乘 / p 值 / IQR
-│  │  ├─ ops.js             # 6 个算子（白名单）
+│  │  ├─ ops.js             # 12 个算子（白名单：描述/剔除/对数/相关/拟合/散点/分组/t检验/标准化/趋势/直方图/缺失）
 │  │  └─ index.js           # 计划校验 + 逐步执行 + 哈希留痕
 │  ├─ export/
 │  │  ├─ zip.js             # 最小 ZIP 写入器（store，无依赖）
 │  │  └─ package.js         # 复现包：数据/计划/结果/报告/清单 + 自带 verify.mjs 校验脚本
 │  └─ ui/app.js             # 工作台交互与渲染（含一键演示、内联提示、DSL 视图、图注）
-├─ sample-data/thermal.csv  # 示例数据（含 2 个离群点）
+├─ sample-data/thermal.csv  # 示例数据（热敏电阻，含 2 个离群点）
+├─ sample-data/battery.csv  # 示例数据（电池两组 A/B，含 4 处缺失，用来演示分组/t 检验）
 ├─ sample-data/audit-case.json # 审计演示案（6 条结论，1 条被改、1 条缺步骤）
-├─ tests/kernel.test.mjs    # 19 条单测（node --test 或直接 node 运行）
+├─ tests/kernel.test.mjs    # 24 条单测（node --test 或直接 node 运行）
 ├─ demo/视频分镜.md          # 5–8 分钟演示视频的分镜与口播要点
 ├─ docs/                    # 界面截图、技术文档、提交清单
 └─ prompts/                 # AI 协同过程记录（8 轮迭代 + 4 张真界面截图）
@@ -123,7 +128,7 @@ reprolab/
 
 ```bash
 node tests/kernel.test.mjs
-# 19 tests / 19 pass：解析、白名单、破坏性算子确认、可复现哈希、异常点、相关性、审计三态、
+# 24 tests / 24 pass：解析、白名单、破坏性算子确认、可复现哈希、异常点、相关性、审计三态、
 #                     结论溯源、删除清单一致性、删行后统计口径、复现包指纹可重算
 ```
 
@@ -148,7 +153,7 @@ node verify.mjs
 
 ## 已知边界（MVP）
 
-- 支持 ≤5 万行 CSV；6 个算子；单用户、单文件；
+- 支持 ≤5 万行 CSV；12 个算子；单用户、单文件；
 - 实测 5 万行 × 2 列：解析 22 ms / 执行 80 ms / 打包 3 ms（Node 24，本机），界面不卡；
 - 不做任意代码执行、不做云端存储、不做协同编辑；
 - LLM 编译为可选增强：不配 Key 也能完整演示，且规则编译结果同样可复现。

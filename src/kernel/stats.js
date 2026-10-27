@@ -128,3 +128,50 @@ function quantile(sorted, q) {
   const rest = pos - base;
   return sorted[base + 1] !== undefined ? sorted[base] + rest * (sorted[base + 1] - sorted[base]) : sorted[base];
 }
+
+/** 均值与样本标准差（只用有限值） */
+export function meanStd(values) {
+  const v = values.filter((x) => Number.isFinite(x));
+  const n = v.length;
+  if (n === 0) return { n: 0, mean: null, std: null };
+  const mean = v.reduce((a, b) => a + b, 0) / n;
+  const variance = n > 1 ? v.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1) : 0;
+  return { n, mean, std: Math.sqrt(variance) };
+}
+
+/** Welch 两样本 t 检验（不假设方差齐性），返回 t / df / 双尾 p / 均值差 */
+export function welchTTest(a, b) {
+  const va = a.filter((x) => Number.isFinite(x));
+  const vb = b.filter((x) => Number.isFinite(x));
+  if (va.length < 2 || vb.length < 2) throw new Error('每组至少需要 2 个有效样本才能做 t 检验');
+  const sa = meanStd(va), sb = meanStd(vb);
+  const varA = sa.std ** 2 / va.length;
+  const varB = sb.std ** 2 / vb.length;
+  const denom = Math.sqrt(varA + varB);
+  const t = denom === 0 ? 0 : (sa.mean - sb.mean) / denom;
+  const df = (varA + varB) ** 2 / ((varA ** 2) / (va.length - 1) + (varB ** 2) / (vb.length - 1));
+  const p = df > 0 && Number.isFinite(t) ? Math.max(0, Math.min(1, betai(df / 2, 0.5, df / (df + t * t)))) : 1;
+  return {
+    t, df, p,
+    meanA: sa.mean, meanB: sb.mean, diff: sa.mean - sb.mean,
+    stdA: sa.std, stdB: sb.std, nA: va.length, nB: vb.length,
+  };
+}
+
+/** 等宽直方图 */
+export function histogram(values, binCount = 8) {
+  const v = values.filter((x) => Number.isFinite(x));
+  if (v.length === 0) return { bins: [], min: null, max: null };
+  const min = Math.min(...v), max = Math.max(...v);
+  const width = (max - min) / binCount || 1;
+  const bins = Array.from({ length: binCount }, (_, i) => ({
+    from: round(min + width * i, 6),
+    to: round(min + width * (i + 1), 6),
+    count: 0,
+  }));
+  for (const x of v) {
+    const i = Math.min(binCount - 1, Math.max(0, Math.floor((x - min) / width)));
+    bins[i].count += 1;
+  }
+  return { bins, min, max, n: v.length, width };
+}

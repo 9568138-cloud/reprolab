@@ -81,6 +81,14 @@ $('loadSample').addEventListener('click', async () => {
   const res = await fetch('./sample-data/thermal.csv');
   loadCsv(await res.text(), '示例 thermal.csv');
 });
+$('loadBattery').addEventListener('click', async () => {
+  const res = await fetch('./sample-data/battery.csv');
+  const ds = await loadCsv(await res.text(), '示例 battery.csv');
+  if (ds) {
+    $('question').value = 'A 组和 B 组的容量有没有显著差异？各组分别是什么水平？有缺失值吗？';
+    toast('已载入电池数据：这份有两组（A/B），适合演示分组与 t 检验', 'ok');
+  }
+});
 
 // ---------- 02 编译计划 ----------
 $('askExample').addEventListener('click', () => { $('question').value = EXAMPLE_QUESTION; $('question').focus(); });
@@ -161,6 +169,8 @@ function labelOf(op) {
   return {
     describe: '描述统计', drop_outliers: '剔除异常点（IQR）', transform_log: '对数变换 ln(x)',
     correlate: '相关性检验', fit_linear: '线性拟合', scatter: '散点图',
+    group_summary: '分组汇总', ttest: '两组均值检验（Welch t）', normalize: '标准化 z-score',
+    trend: '时间趋势', histogram: '分布直方图', missing_report: '缺失值盘点',
   }[op] || op;
 }
 
@@ -269,6 +279,70 @@ function droppedPoints(run) {
 }
 
 function renderChart(run) {
+  const has = (op) => run.steps.some((s) => s.op === op);
+  if (has('scatter')) return renderScatterChart(run);
+  const group = run.steps.find((s) => s.op === 'group_summary');
+  if (group) {
+    return renderBars(group.output.groups.map((g) => ({ label: g.group, value: g.mean, sub: `n=${g.n}` })), {
+      title: `${group.output.column} 各组均值`, xLabel: group.output.groupBy, yLabel: group.output.column, stepId: group.id,
+    });
+  }
+  const hist = run.steps.find((s) => s.op === 'histogram');
+  if (hist) {
+    return renderBars(hist.output.bins.map((b) => ({ label: b.from, value: b.count })), {
+      title: `${hist.output.column} 分布`, xLabel: '区间（左边界）', yLabel: '条数', stepId: hist.id,
+    });
+  }
+  $('chart').innerHTML = '<div class="hint">本次计划没有绘图步骤</div>';
+}
+
+/** 柱状图：分组均值 / 直方图共用 */
+function renderBars(items, { title, xLabel, yLabel, stepId }) {
+  if (!items.length) { $('chart').innerHTML = '<div class="hint">没有可画的数据</div>'; return; }
+  const W = 520, H = 340, P = 52;
+  const maxV = Math.max(...items.map((i) => i.value), 1e-9);
+  const minV = Math.min(...items.map((i) => i.value), 0);
+  const base = minV > 0 ? 0 : minV;
+  const top = maxV * 1.12 || 1;
+  const sy = (v) => H - P - ((v - base) / (top - base)) * (H - 2 * P);
+  const bw = (W - 2 * P) / items.length;
+  const ticks = Array.from({ length: 5 }, (_, i) => base + ((top - base) * i) / 4);
+
+  const grid = ticks.map((v) => `<line x1="${P}" y1="${sy(v).toFixed(1)}" x2="${W - P}" y2="${sy(v).toFixed(1)}" stroke="#22305c" />
+    <text x="${P - 8}" y="${(sy(v) + 4).toFixed(1)}" fill="#b9c6e8" font-size="10.5" text-anchor="end">${fmtTick(v)}</text>`).join('');
+
+  const bars = items.map((it, i) => {
+    const x = P + bw * i + bw * 0.18;
+    const w = bw * 0.64;
+    const y = sy(it.value);
+    const h = Math.max(1, H - P - y);
+    const color = it.label === 'A' ? '#4da3ff' : it.label === 'B' ? '#7be0c4' : '#4da3ff';
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="4" fill="${color}" opacity=".85"><title>${escapeHtml(String(it.label))}: ${it.value}</title></rect>
+      <text x="${(x + w / 2).toFixed(1)}" y="${(y - 6).toFixed(1)}" fill="#cbd6f2" font-size="10.5" text-anchor="middle">${fmtTick(it.value)}</text>
+      <text x="${(x + w / 2).toFixed(1)}" y="${H - P + 16}" fill="#b9c6e8" font-size="10.5" text-anchor="middle">${escapeHtml(String(it.label))}</text>
+      ${it.sub ? `<text x="${(x + w / 2).toFixed(1)}" y="${H - P + 30}" fill="#8fa0cc" font-size="9.5" text-anchor="middle">${it.sub}</text>` : ''}`;
+  }).join('');
+
+  $('chart').innerHTML = `
+    <svg viewBox="0 0 ${W} ${H}" width="100%" height="340" role="img" aria-label="${escapeHtml(title)}">
+      ${grid}
+      <line x1="${P}" y1="${H - P}" x2="${W - P}" y2="${H - P}" stroke="#24305a" />
+      <line x1="${P}" y1="${P}" x2="${P}" y2="${H - P}" stroke="#24305a" />
+      ${bars}
+      <text x="${W / 2}" y="${H - 6}" fill="#cbd6f2" font-size="12" text-anchor="middle">x：${escapeHtml(xLabel)}</text>
+      <text x="${P - 42}" y="${P - 10}" fill="#cbd6f2" font-size="12">y：${escapeHtml(yLabel)}</text>
+    </svg>
+    <div class="chart-note">${escapeHtml(title)}　·　来自步骤 ${stepId}</div>`;
+}
+
+function fmtTick(v) {
+  if (!Number.isFinite(v)) return '—';
+  if (Math.abs(v) >= 1000) return v.toExponential(2);
+  if (Math.abs(v) >= 10) return String(Number(v.toFixed(1)));
+  return String(Number(v.toFixed(2)));
+}
+
+function renderScatterChart(run) {
   const scatter = run.steps.find((s) => s.op === 'scatter');
   if (!scatter) { $('chart').innerHTML = '<div class="hint">本次计划没有绘图步骤</div>'; return; }
   const { points, line, x, y, transformY } = scatter.output;

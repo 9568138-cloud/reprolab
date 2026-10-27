@@ -1,9 +1,35 @@
-// 算子白名单：AI 只能从这 6 个里挑，代码由本地实现渲染（不由模型生成）
-import { describe, pearson, linearFit, correlationPValue, detectOutliers, round } from './stats.js';
+// 算子白名单：AI 只能从这些里挑，代码由本地实现渲染（不由模型生成）
+import { describe, pearson, linearFit, correlationPValue, detectOutliers, round, meanStd, welchTTest, histogram } from './stats.js';
 import { columnValues, numericValues } from './csv.js';
 
 /** 破坏性算子：涉及删数据，必须人工确认 */
 export const DESTRUCTIVE = new Set(['drop_outliers']);
+
+/** 取某一列的值 + 行号（沿用 CSV 行号：下标 + 2） */
+function pairsOf(dataset, column) {
+  const col = dataset.columns.find((c) => c.name === column);
+  if (!col) throw new Error(`找不到列：${column}`);
+  return dataset.rows.map((r, i) => ({ row: i + 2, raw: r[col.index] }));
+}
+
+function groupValues(dataset, groupBy, column) {
+  const gcol = dataset.columns.find((c) => c.name === groupBy);
+  const vcol = dataset.columns.find((c) => c.name === column);
+  if (!gcol) throw new Error(`找不到分组列：${groupBy}`);
+  if (!vcol) throw new Error(`找不到数值列：${column}`);
+  const map = new Map();
+  for (const r of dataset.rows) {
+    const g = String(r[gcol.index] ?? '').trim();
+    const raw = String(r[vcol.index] ?? '').trim();
+    // 空单元格是「缺失」，不是 0 —— 这条曾经把一组均值算错 600
+    if (!g || raw === '') continue;
+    const v = Number(raw);
+    if (!Number.isFinite(v)) continue;
+    if (!map.has(g)) map.set(g, []);
+    map.get(g).push(v);
+  }
+  return map;
+}
 
 export const OPERATORS = {
   describe: {
@@ -102,6 +128,104 @@ export const OPERATORS = {
       return {
         kind: 'scatter', x, y, transformY: transformY || null,
         points: points.slice(0, 2000), line, count: points.length,
+      };
+    },
+  },
+
+  // ---------- 第二批算子（iter 11） ----------
+  group_summary: {
+    label: '分组汇总（按类别算均值/中位数）',
+    params: { groupBy: 'string', column: 'string' },
+    run({ dataset, droppedRows }, { groupBy, column }) {
+      const rows = maskRows(dataset, droppedRows);
+      const map = groupValues({ ...dataset, rows }, groupBy, column);
+      const groups = [...map.entries()].map(([group, vals]) => {
+        const d = describe(vals);
+        return { group, n: d.n, mean: d.mean, median: d.median, min: d.min, max: d.max };
+      }).sort((a, b) => b.mean - a.mean);
+      return { kind: 'group', groupBy, column, groups, groupCount: groups.length, top: groups[0] || null };
+    },
+  },
+
+  ttest: {
+    label: '两组均值检验（Welch t）',
+    params: { groupBy: 'string', column: 'string', groupA: 'string?', groupB: 'string?' },
+    run({ dataset, droppedRows }, { groupBy, column, groupA, groupB }) {
+      const rows = maskRows(dataset, droppedRows);
+      const map = groupValues({ ...dataset, rows }, groupBy, column);
+      const names = [...map.keys()];
+      if (names.length < 2) throw new Error(`分组列 ${groupBy} 只有 ${names.length} 组，做不了两组比较`);
+      const bySize = names.sort((a, b) => map.get(b).length - map.get(a).length);
+      const a = groupA || bySize[0];
+      const b = groupB && groupB !== a ? groupB : bySize.find((n) => n !== a);
+      if (!map.has(a) || !map.has(b)) throw new Error(`分组 ${a} 或 ${b} 不存在`);
+      const res = welchTTest(map.get(a), map.get(b));
+      return {
+        kind: 'ttest', groupBy, column, groupA: a, groupB: b,
+        t: round(res.t, 6), df: round(res.df, 4), p: round(res.p, 8),
+        meanA: round(res.meanA, 6), meanB: round(res.meanB, 6), diff: round(res.diff, 6),
+        nA: res.nA, nB: res.nB, significant: res.p < 0.05,
+      };
+    },
+  },
+
+  normalize: {
+    label: '标准化 z-score',
+    params: { column: 'string' },
+    run({ dataset, droppedRows }, { column }) {
+      const rows = maskRows(dataset, droppedRows);
+      const s = meanStd(numericValues({ ...dataset, rows }, column));
+      if (!s.n) throw new Error(`${column} 没有有效数值`);
+      if (!s.std) throw new Error(`${column} 标准差为 0，标准化没有意义`);
+      return { kind: 'transform', column, transform: 'zscore', mean: round(s.mean, 6), std: round(s.std, 6), n: s.n };
+    },
+  },
+
+  trend: {
+    label: '时间趋势（按行序拟合）',
+    params: { column: 'string' },
+    run({ dataset, droppedRows }, { column }) {
+      const rows = maskRows(dataset, droppedRows);
+      const ys = numericValues({ ...dataset, rows }, column);
+      const xs = ys.map((_, i) => i + 1);
+      const fit = linearFit(xs, ys);
+      return {
+        kind: 'trend', column,
+        slope: round(fit.slope, 6), intercept: round(fit.intercept, 6),
+        r2: round(fit.r2, 6), n: fit.n,
+        per100: round(fit.slope * 100, 4),
+      };
+    },
+  },
+
+  histogram: {
+    label: '分布直方图',
+    params: { column: 'string', bins: 'number?' },
+    run({ dataset, droppedRows }, { column, bins = 8 }) {
+      const rows = maskRows(dataset, droppedRows);
+      const h = histogram(numericValues({ ...dataset, rows }, column), Math.max(2, Math.min(20, Number(bins) || 8)));
+      const peak = h.bins.reduce((best, b) => (b.count > best.count ? b : best), h.bins[0]);
+      return {
+        kind: 'histogram', column, bins: h.bins, min: round(h.min, 6), max: round(h.max, 6),
+        n: h.n, peak: peak ? { from: peak.from, to: peak.to, count: peak.count } : null,
+      };
+    },
+  },
+
+  missing_report: {
+    label: '缺失值盘点',
+    params: { column: 'string' },
+    run({ dataset, droppedRows }, { column }) {
+      const rows = maskRows(dataset, droppedRows);
+      const items = pairsOf({ ...dataset, rows }, column);
+      const missing = items.filter((it) => {
+        const s = String(it.raw ?? '').trim();
+        return s === '' || s.toLowerCase() === 'nan' || s.toLowerCase() === 'null';
+      });
+      return {
+        kind: 'missing', column, total: items.length, missing: missing.length,
+        missingRows: missing.map((m) => m.row).slice(0, 50),
+        rate: round(items.length ? missing.length / items.length : 0, 6),
       };
     },
   },

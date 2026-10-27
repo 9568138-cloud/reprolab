@@ -211,3 +211,69 @@ test('审计报告：Markdown 里三种判定都在', async () => {
   assert.ok(md.includes('无法复现'));
   assert.ok(md.includes('审计结论'));
 });
+
+// ---------- 第二批算子（分组 / t 检验 / 分布 / 趋势 / 缺失） ----------
+const batteryCsv = readFileSync(new URL('../sample-data/battery.csv', import.meta.url), 'utf8');
+
+test('分组汇总：空单元格算缺失，不能当 0（回归测试）', async () => {
+  const ds = toDataset(batteryCsv);
+  const plan = { version: 1, steps: [{ id: 's1', op: 'group_summary', params: { groupBy: 'group', column: 'capacity_mah' } }] };
+  const run = await executePlan(plan, ds);
+  const o = run.steps[0].output;
+  assert.equal(o.groupCount, 2);
+  const a = o.groups.find((g) => g.group === 'A');
+  const b = o.groups.find((g) => g.group === 'B');
+  assert.equal(a.n, 20, 'A 组没有缺失值');
+  assert.equal(b.n, 16, 'B 组 4 个空单元格必须被排除，而不是算成 0');
+  assert.ok(b.mean > 2900 && b.mean < 3000, `B 组均值应在 2900-3000，实际 ${b.mean}`);
+});
+
+test('两组检验：A 组容量显著高于 B 组', async () => {
+  const ds = toDataset(batteryCsv);
+  const plan = { version: 1, steps: [{ id: 's1', op: 'ttest', params: { groupBy: 'group', column: 'capacity_mah' } }] };
+  const run = await executePlan(plan, ds);
+  const o = run.steps[0].output;
+  assert.equal(o.groupA, 'A');
+  assert.equal(o.groupB, 'B');
+  assert.ok(o.diff > 40 && o.diff < 50, `均值差应约 45，实际 ${o.diff}`);
+  assert.ok(o.p < 0.01, `p 应显著，实际 ${o.p}`);
+  assert.equal(o.significant, true);
+});
+
+test('分布直方图：各箱计数之和等于有效样本数', async () => {
+  const ds = toDataset(batteryCsv);
+  const plan = { version: 1, steps: [{ id: 's1', op: 'histogram', params: { column: 'capacity_mah', bins: 5 } }] };
+  const run = await executePlan(plan, ds);
+  const o = run.steps[0].output;
+  const sum = o.bins.reduce((s, b) => s + b.count, 0);
+  assert.equal(sum, o.n);
+  assert.equal(o.n, 36, '40 行减去 4 个缺失');
+});
+
+test('缺失值盘点与时间趋势', async () => {
+  const ds = toDataset(batteryCsv);
+  const plan = { version: 1, steps: [
+    { id: 's1', op: 'missing_report', params: { column: 'capacity_mah' } },
+    { id: 's2', op: 'trend', params: { column: 'internal_mohm' } },
+  ] };
+  const run = await executePlan(plan, ds);
+  const missing = run.steps[0].output;
+  assert.equal(missing.missing, 4);
+  assert.equal(missing.rate, 0.1);
+  const trend = run.steps[1].output;
+  assert.ok(trend.slope > 0, '内阻随循环次数上升');
+  assert.ok(trend.r2 > 0.5, '交替分组的噪声会拉低 R²，但仍应明显');
+});
+
+test('规则编译：一句话能同时点亮 分组/检验/缺失 三个算子', async () => {
+  const ds = toDataset(batteryCsv);
+  const plan = compileByRules(ds, 'A 组和 B 组的容量有没有显著差异？各组分别是什么水平？有缺失值吗？');
+  const ops = plan.steps.map((s) => s.op);
+  assert.ok(ops.includes('missing_report'));
+  assert.ok(ops.includes('group_summary'));
+  assert.ok(ops.includes('ttest'));
+  const run = await executePlan(plan, ds);
+  const claims = buildClaims(plan, run.steps);
+  assert.ok(claims.length >= 3);
+  for (const c of claims) renderClaim(c, run.steps);
+});

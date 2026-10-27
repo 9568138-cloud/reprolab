@@ -4,7 +4,13 @@
 import { validatePlan } from './kernel/index.js';
 
 const KEYWORDS = [
-  { op: 'drop_outliers', words: ['异常', '离群', '野值', '剔除', '去掉', '删掉', 'bug', '噪'] },
+  { op: 'missing_report', words: ['缺失', '空值', '缺数据', 'nan', 'null', '漏填'] },
+  { op: 'normalize', words: ['标准化', 'z-score', 'zscore', '归一化'] },
+  { op: 'ttest', words: ['两组', 't 检验', 't检验', '均值差', '差异显著', '显著差异'] },
+  { op: 'group_summary', words: ['分组', '各组', '按类别', '每类', '各类', '不同班', '对比各组'] },
+  { op: 'histogram', words: ['分布', '直方图', '频数', '区间分布'] },
+  { op: 'trend', words: ['随时间', '时间序列', '变化趋势', '逐日', '逐行'] },
+  { op: 'drop_outliers', words: ['异常', '离群', '野值', '剔除', '去掉', '删掉', '噪'] },
   { op: 'transform_log', words: ['对数', 'log', 'ln', '指数', '倍数'] },
   { op: 'correlate', words: ['相关', '关系', '关联', '趋势', '负相关', '正相关', '影响', '下降', '降低', '上升', '升高', '越', '跟着'] },
   { op: 'fit_linear', words: ['拟合', '回归', '斜率', '方程', '线性', '模型', '预测', '拟一条', '拟个', '直线'] },
@@ -20,26 +26,27 @@ export function compileByRules(dataset, question) {
   const mentioned = nums.filter((c) => question.includes(c.name));
   const x = mentioned[0]?.name || nums[0].name;
   const y = mentioned[1]?.name || nums[1].name;
+  // 分组类算子需要一个类别列（文本列）；没有就自动跳过，不报错
+  const groupCol = dataset.columns.find((c) => c.kind === 'string' && c.name !== y) || null;
 
   const wantLog = hits.has('transform_log');
   const steps = [];
+  const push = (op, params) => steps.push({ id: `s${steps.length + 1}`, op, params });
 
   steps.push({ id: 's1', op: 'describe', params: { column: y } });
 
-  if (hits.has('drop_outliers')) {
-    steps.push({ id: `s${steps.length + 1}`, op: 'drop_outliers', params: { column: y, k: 1.5, confirm: true } });
-  }
-  if (wantLog) {
-    steps.push({ id: `s${steps.length + 1}`, op: 'transform_log', params: { column: y } });
-  }
-  if (hits.has('correlate') || wantLog) {
-    steps.push({ id: `s${steps.length + 1}`, op: 'correlate', params: { x, y, ...(wantLog ? { transformY: 'ln' } : {}) } });
-  }
-  if (hits.has('fit_linear') || wantLog) {
-    steps.push({ id: `s${steps.length + 1}`, op: 'fit_linear', params: { x, y, ...(wantLog ? { transformY: 'ln' } : {}) } });
-  }
+  if (hits.has('missing_report')) push('missing_report', { column: y });
+  if (hits.has('normalize')) push('normalize', { column: y });
+  if (hits.has('drop_outliers')) push('drop_outliers', { column: y, k: 1.5, confirm: true });
+  if (wantLog) push('transform_log', { column: y });
+  if (groupCol && hits.has('group_summary')) push('group_summary', { groupBy: groupCol.name, column: y });
+  if (groupCol && hits.has('ttest')) push('ttest', { groupBy: groupCol.name, column: y });
+  if (hits.has('correlate') || wantLog) push('correlate', { x, y, ...(wantLog ? { transformY: 'ln' } : {}) });
+  if (hits.has('fit_linear') || wantLog) push('fit_linear', { x, y, ...(wantLog ? { transformY: 'ln' } : {}) });
+  if (hits.has('trend')) push('trend', { column: y });
+  if (hits.has('histogram')) push('histogram', { column: y, bins: 8 });
   if (hits.has('scatter') || hits.size === 0) {
-    steps.push({ id: `s${steps.length + 1}`, op: 'scatter', params: { x, y, ...(wantLog ? { transformY: 'ln' } : {}) } });
+    push('scatter', { x, y, ...(wantLog ? { transformY: 'ln' } : {}) });
   }
 
   const plan = { version: 1, question, engine: 'rules', steps };
@@ -91,6 +98,80 @@ export function buildClaims(plan, steps) {
       verdict: o.removed > 0 ? '需人工确认' : '无需处理',
     });
   }
+  const tt = byOp('ttest')[0];
+  if (tt) {
+    const o = tt.output;
+    claims.push({
+      id: 'c4',
+      text: `${o.groupA} 与 ${o.groupB} 两组的 ${o.column} 均值差 = {{diffText}}（t = {{t}}，df = {{df}}，{{pPhrase}}）`,
+      refs: [
+        { stepId: tt.id, field: 'diffText', value: `${Number(o.diff.toFixed(4))}` },
+        { stepId: tt.id, field: 't', value: o.t },
+        { stepId: tt.id, field: 'df', value: o.df },
+        { stepId: tt.id, field: 'pPhrase', value: o.p < 1e-4 ? 'p < 0.0001' : `p = ${Number(o.p.toFixed(4))}` },
+      ],
+      verdict: o.significant ? '两组差异显著（p < 0.05）' : '两组差异不显著（p ≥ 0.05）',
+    });
+  }
+
+  const gp = byOp('group_summary')[0];
+  if (gp && gp.output.top) {
+    const o = gp.output;
+    claims.push({
+      id: 'c5',
+      text: `按 ${o.groupBy} 分组得到 {{groupCount}} 组，${o.column} 均值最高的是「${o.top.group}」（{{topMean}}，n = {{topN}}）`,
+      refs: [
+        { stepId: gp.id, field: 'groupCount', value: o.groupCount },
+        { stepId: gp.id, field: 'topMean', value: o.top.mean },
+        { stepId: gp.id, field: 'topN', value: o.top.n },
+      ],
+      verdict: `共 ${o.groups.length} 个类别，按均值降序`,
+    });
+  }
+
+  const tr = byOp('trend')[0];
+  if (tr) {
+    const o = tr.output;
+    claims.push({
+      id: 'c6',
+      text: `按记录顺序，${o.column} 每 100 行变化 {{per100}}（斜率 {{slope}}，R² = {{r2}}）`,
+      refs: [
+        { stepId: tr.id, field: 'per100', value: o.per100 },
+        { stepId: tr.id, field: 'slope', value: o.slope },
+        { stepId: tr.id, field: 'r2', value: o.r2 },
+      ],
+      verdict: Math.abs(o.r2) >= 0.5 ? '顺序趋势明显' : '顺序趋势较弱',
+    });
+  }
+
+  const hs = byOp('histogram')[0];
+  if (hs && hs.output.peak) {
+    const o = hs.output;
+    claims.push({
+      id: 'c7',
+      text: `${o.column} 的分布峰值落在 ${o.peak.from}–${o.peak.to} 区间（{{peakCount}} 条，占 {{peakPct}}%）`,
+      refs: [
+        { stepId: hs.id, field: 'peakCount', value: o.peak.count },
+        { stepId: hs.id, field: 'peakPct', value: Number(((o.peak.count / o.n) * 100).toFixed(1)) },
+      ],
+      verdict: `${o.n} 个样本，范围 ${o.min}–${o.max}`,
+    });
+  }
+
+  const ms = byOp('missing_report')[0];
+  if (ms) {
+    const o = ms.output;
+    claims.push({
+      id: 'c8',
+      text: `${o.column} 共 {{missing}} 个缺失值（占总行数 {{ratePct}}%）`,
+      refs: [
+        { stepId: ms.id, field: 'missing', value: o.missing },
+        { stepId: ms.id, field: 'ratePct', value: Number((o.rate * 100).toFixed(2)) },
+      ],
+      verdict: o.missing > 0 ? '存在缺失，后续统计已自动跳过' : '无缺失',
+    });
+  }
+
   return claims;
 }
 
@@ -113,6 +194,12 @@ function resolveField(output, field) {
   if (field === 'slopeSign') return output.slope < 0 ? '−' : '+';
   if (field === 'absSlope') return Math.abs(output.slope);
   if (field === 'pPhrase') return output.p < 1e-4 ? 'p < 0.0001' : `p = ${Number(output.p.toFixed(4))}`;
+  if (field === 'diffText') return Number(Number(output.diff).toFixed(4));
+  if (field === 'topMean') return output.top?.mean;
+  if (field === 'topN') return output.top?.n;
+  if (field === 'peakCount') return output.peak?.count;
+  if (field === 'peakPct') return output.peak ? Number(((output.peak.count / output.n) * 100).toFixed(1)) : undefined;
+  if (field === 'ratePct') return Number((output.rate * 100).toFixed(2));
   return output[field];
 }
 
@@ -130,7 +217,8 @@ export async function compileByLLM({ dataset, question, endpoint, apiKey, model 
   const prompt = `你是数据分析计划编译器。只输出 JSON，不要解释。
 可用算子（白名单，禁止其他）：
 describe{column} / drop_outliers{column,k,confirm} / transform_log{column} / correlate{x,y,transformY?} / fit_linear{x,y,transformY?} / scatter{x,y,transformY?}
-字段说明：column/x/y 必须是下面列名之一；transformY 只能是 "ln" 或省略；drop_outliers 必须带 "confirm": true。
+group_summary{groupBy,column} / ttest{groupBy,column,groupA?,groupB?} / normalize{column} / trend{column} / histogram{column,bins?} / missing_report{column}
+字段说明：column/x/y/groupBy 必须是下面列名之一；groupBy 必须是文本列；transformY 只能是 "ln" 或省略；drop_outliers 必须带 "confirm": true。
 输出结构：{"version":1,"question":"...","steps":[{"id":"s1","op":"...","params":{...}}]}
 数据列：${columns}
 样本行数：${dataset.rowCount}
