@@ -18,9 +18,11 @@ node --version
 node serve.mjs
 # → http://127.0.0.1:5173
 
-# 3) 浏览器打开后：
-#    点「载入示例（热敏电阻）」→ 输入问题 → 编译分析计划 → 勾选确认 → 执行
-#    再点「重跑一致性校验」看两次产物哈希是否一致；「导出复现包」拿 zip
+# 3) 浏览器打开后，两条路任选：
+#    A. 点右上角「▶ 一键演示」——自动走完 数据→提问→计划→确认→执行→重跑校验，约 8 秒；
+#    B. 手动：点「载入示例（热敏电阻）」→ 填问题（或点「示例问题」）→ 编译分析计划
+#       → 勾选确认「剔除异常点」→ 执行 → 点结论上的数字徽章回溯步骤
+#       → 「重跑一致性校验」看两次产物哈希是否一致 → 「导出复现包」拿 zip
 ```
 
 零依赖：没有 `npm install`，没有构建产物，断网也能跑（LLM 可选，不配 Key 走本地规则编译）。
@@ -64,8 +66,8 @@ reprolab/
 │  │  └─ index.js           # 计划校验 + 逐步执行 + 哈希留痕
 │  ├─ export/
 │  │  ├─ zip.js             # 最小 ZIP 写入器（store，无依赖）
-│  │  └─ package.js         # 复现包：数据/计划/结果/报告/verify 脚本
-│  └─ ui/app.js             # 工作台交互与渲染
+│  │  └─ package.js         # 复现包：数据/计划/结果/报告/清单 + 自带 verify.mjs 校验脚本
+│  └─ ui/app.js             # 工作台交互与渲染（含一键演示、内联提示、DSL 视图、图注）
 ├─ sample-data/thermal.csv  # 示例数据（含 2 个离群点）
 ├─ tests/kernel.test.mjs    # 10 条单测（node --test 或直接 node 运行）
 ├─ docs/                    # 作品介绍、提交清单
@@ -76,14 +78,28 @@ reprolab/
 
 ```bash
 node tests/kernel.test.mjs
-# 10 tests / 10 pass：解析、白名单、破坏性算子确认、可复现哈希、异常点、相关性、结论溯源
+# 13 tests / 13 pass：解析、白名单、破坏性算子确认、可复现哈希、异常点、相关性、
+#                     结论溯源、删除清单一致性、删行后统计口径、复现包指纹可重算
 ```
 
 ## 可复现性怎么证明
 
 1. 同一份 CSV + 同一个 `plan.json`，执行两次 → **产物总哈希逐位一致**（界面「重跑一致性校验」）；
-2. 导出的 zip 里带 `data.csv`（含原始 SHA-256）、`plan.json`、`run.json`（每步哈希）、`report.md`；
-3. 评委解压后按报告里的步骤重跑，即可比对哈希。
+2. 导出的 zip 里带 `data.csv`（含原始 SHA-256）、`plan.json`、`run.json`（每步哈希 + 删除行清单）、`report.md`、`meta.json`、`verify.mjs`；
+3. **评委解压后不需要 ReproLab**，一条命令就能验：
+
+```bash
+unzip reprolab-*.zip -d reprolab-check && cd reprolab-check
+node verify.mjs
+# PASS  数据 SHA-256 与包内记录一致          [352e614479276cc6…]
+# PASS  产物哈希可重算（执行记录未被篡改）    [af3418573d71ba96…]
+# PASS  meta.json 与 run.json 的产物哈希一致
+# PASS  计划只使用白名单算子
+# PASS  破坏性算子已人工确认
+# ✓ 全部通过：数据未改动、执行记录可重算、计划在白名单内。
+```
+
+`verify.mjs` 只依赖 Node 内置模块；改掉 `run.json` 里任何一个数字，它会立刻 FAIL 并以退出码 1 结束（实测）。
 
 ## 已知边界（MVP）
 
