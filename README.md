@@ -27,6 +27,16 @@ node serve.mjs
 
 零依赖：没有 `npm install`，没有构建产物，断网也能跑（LLM 可选，不配 Key 走本地规则编译）。
 
+## 界面
+
+| 数据接入 | 分析计划（含人工确认闸门） |
+| :--: | :--: |
+| ![首页](docs/ui-01-home.png) | ![计划](docs/ui-02-plan.png) |
+
+| 结论 → 步骤溯源 | 时间轴 + 散点图（红圈＝被剔除行） |
+| :--: | :--: |
+| ![结果](docs/ui-03-results.png) | ![图表](docs/ui-04-chart.png) |
+
 ## 核心闭环
 
 ```
@@ -69,9 +79,10 @@ reprolab/
 │  │  └─ package.js         # 复现包：数据/计划/结果/报告/清单 + 自带 verify.mjs 校验脚本
 │  └─ ui/app.js             # 工作台交互与渲染（含一键演示、内联提示、DSL 视图、图注）
 ├─ sample-data/thermal.csv  # 示例数据（含 2 个离群点）
-├─ tests/kernel.test.mjs    # 10 条单测（node --test 或直接 node 运行）
-├─ docs/                    # 作品介绍、提交清单
-└─ prompts/                 # AI 协同过程记录（迭代日志）
+├─ tests/kernel.test.mjs    # 13 条单测（node --test 或直接 node 运行）
+├─ demo/视频分镜.md          # 5–8 分钟演示视频的分镜与口播要点
+├─ docs/                    # 界面截图、技术文档、提交清单
+└─ prompts/                 # AI 协同过程记录（8 轮迭代 + 4 张真界面截图）
 ```
 
 ## 测试
