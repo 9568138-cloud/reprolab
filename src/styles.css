@@ -153,6 +153,21 @@ textarea, .input {
 /* ---- 图表说明 ---- */
 .chart-note { margin-top: 8px; font-size: 11.5px; color: var(--muted); text-align: center; }
 
+/* ---- 首屏主张 ---- */
+.hero {
+  padding: 34px 30px 30px;
+  border: 1px solid var(--line); border-radius: 18px;
+  background:
+    radial-gradient(700px 260px at 12% -20%, rgba(77, 163, 255, .22), transparent 70%),
+    radial-gradient(500px 220px at 88% 120%, rgba(123, 224, 196, .14), transparent 70%),
+    linear-gradient(180deg, #142046, #101832);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, .3);
+}
+.hero-title { margin: 0 0 10px; font-size: 27px; letter-spacing: .5px; }
+.hero-sub { margin: 0 0 18px; max-width: 760px; color: #c3cdea; font-size: 14.5px; line-height: 1.75; }
+.hero-sub b { color: var(--accent-2); font-weight: 600; }
+.hero-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
 /* ---- 模式切换 ---- */
 .modes { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 .mode {

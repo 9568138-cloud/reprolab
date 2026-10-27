@@ -483,6 +483,7 @@ const STEP_IDS = ['step1', 'step2', 'step3', 'step4', 'step5'];
 function setMode(mode) {
   document.body.dataset.mode = mode;
   document.querySelectorAll('#modeSwitch .mode').forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
+  show('hero', mode !== 'audit');
   if (mode === 'audit') {
     STEP_IDS.forEach((id) => show(id, false));
     show('auditPanel', true);
@@ -497,6 +498,21 @@ function setMode(mode) {
 $('modeSwitch').addEventListener('click', (e) => {
   const btn = e.target.closest('.mode');
   if (btn) setMode(btn.dataset.mode);
+});
+
+$('heroAnalyze').addEventListener('click', async () => {
+  const res = await fetch('./sample-data/thermal.csv');
+  await loadCsv(await res.text(), '示例 thermal.csv');
+  $('question').value = EXAMPLE_QUESTION;
+  $('step2').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  toast('已载入示例，点「编译分析计划」开始', 'ok');
+});
+
+$('heroAudit').addEventListener('click', async () => {
+  setMode('audit');
+  const res = await fetch('./sample-data/audit-case.json');
+  await loadAuditCase(await res.json(), '示例');
+  $('auditRun').scrollIntoView({ behavior: 'smooth', block: 'center' });
 });
 
 // ---------- 审计 ----------

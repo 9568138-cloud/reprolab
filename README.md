@@ -36,6 +36,10 @@ node serve.mjs          # 打开后点右上角「审计」
 
 判定规则：数值允许 0.1% 相对误差（报告通常四舍五入到 4 位）；差异超过则是**不符**；步骤或字段找不到是**无法复现**；声明的产物哈希对不上，整体不通过。
 
+## 命令行也能验
+
+
+
 ## 快速开始（10 分钟复现）
 
 ```bash
@@ -101,6 +105,7 @@ node serve.mjs
 reprolab/
 ├─ index.html               # 单页工作台
 ├─ serve.mjs                # 零依赖静态服务器
+├─ cli.mjs                  # 命令行：audit / check，可进 CI
 ├─ src/
 │  ├─ styles.css
 │  ├─ planner.js            # 自然语言 → 计划 DSL；结论卡生成与校验
