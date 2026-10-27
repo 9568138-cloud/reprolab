@@ -2,6 +2,7 @@
 // 设计原则：解压后不依赖网络、不依赖 ReproLab 界面，`node verify.mjs` 就能验真伪。
 import { sha256, stableStringify } from '../kernel/hash.js';
 import { canonicalArtifact } from '../kernel/index.js';
+import { OPERATORS } from '../kernel/ops.js';
 import { renderClaim } from '../planner.js';
 
 export async function buildReproducePackage({ rawCsv, dataset, plan, run, claims, meta = {} }) {
@@ -115,7 +116,7 @@ function stable(v) {
 }
 const sha = (s) => createHash('sha256').update(s).digest('hex');
 
-const WHITELIST = ['describe', 'drop_outliers', 'transform_log', 'correlate', 'fit_linear', 'scatter'];
+const WHITELIST = ${JSON.stringify(Object.keys(OPERATORS))};
 const results = [];
 const check = (name, pass, detail) => results.push({ name, pass, detail });
 

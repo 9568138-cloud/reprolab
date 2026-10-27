@@ -251,3 +251,23 @@ test('审计报告：Markdown 里三种判定都在', async () => {
   assert.ok(md.includes('无法复现'));
   assert.ok(md.includes('审计结论'));
 });
+
+// ---------- 回归：两个曾经翻车的坑 ----------
+test('回归：只提到一列时，x 和 y 不能撞成同一列（否则 r 恒为 1）', () => {
+  const d = ds(iris);
+  const plan = compileByRules(d, 'petal_width_cm 怎么样');
+  const corr = plan.steps.find((s) => s.op === 'correlate' || s.op === 'fit_linear' || s.op === 'scatter');
+  if (corr) assert.notEqual(corr.params.x, corr.params.y, `x 与 y 撞了：${corr.params.x}`);
+});
+
+test('回归：复现包里的 verify.mjs 白名单要跟算子表同步（曾漏掉新算子导致 FAIL）', async () => {
+  const d = ds(iris);
+  const plan = { version: 1, steps: [{ id: 's1', op: 'ttest', params: { groupBy: 'species', column: 'petal_length_cm' } }] };
+  const run = await executePlan(plan, d);
+  const pkg = await buildReproducePackage({ rawCsv: iris, dataset: d, plan, run, claims: [], meta: {} });
+  const verify = pkg.files.find((f) => f.name === 'verify.mjs').text;
+  const { OPERATORS } = await import('../src/kernel/ops.js');
+  for (const op of Object.keys(OPERATORS)) {
+    assert.ok(verify.includes(`"${op}"`), `verify.mjs 白名单缺少算子 ${op}`);
+  }
+});

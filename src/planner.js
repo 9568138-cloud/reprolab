@@ -44,8 +44,10 @@ export function compileByRules(dataset, question) {
   const nums = dataset.columns.filter((c) => c.kind === 'number');
   if (nums.length < 2) throw new Error('至少需要两列数值才能做趋势分析');
   const mentioned = nums.filter((c) => question.includes(c.name));
-  const x = mentioned[0]?.name || nums[0].name;
-  const y = mentioned[1]?.name || nums[1].name;
+  let x = mentioned[0]?.name || nums[0].name;
+  let y = mentioned[1]?.name || nums[1].name;
+  // 只提到一列时，别让 x 和 y 撞成同一列（否则相关系数恒为 1）
+  if (x === y) x = nums.find((c) => c.name !== y)?.name || x;
   // 分组类算子需要一个类别列（文本列）；没有就自动跳过，不报错。
   // 选「不同取值最少」的那一列：城市(70) 比 日期(192) 更适合当分组。
   const groupCol = pickGroupColumn(dataset, y);
