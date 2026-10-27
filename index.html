@@ -85,24 +85,48 @@
 
   <section class="card" id="step2">
     <div class="card-head">
-      <h2><span class="num">02</span>用一句话提需求</h2>
+      <h2><span class="num">02</span>提需求</h2>
       <span class="hint">AI 只负责编译计划，不写代码、不碰数据</span>
     </div>
-    <input id="question" class="input" placeholder="例：这组热敏电阻数据，温度升高是不是真的让阻值下降？有没有要去掉的异常点？帮我出一张能放进报告的图。" />
-    <div class="row">
-      <button class="btn primary" id="compileBtn">编译分析计划</button>
-      <button class="btn ghost" id="toggleLLM">配置 LLM（可选）</button>
-      <button class="btn ghost" id="askExample" title="填一个示例问题">示例问题</button>
-      <span class="hint" id="compileHint"></span>
+    <div class="tabs" id="askTabs">
+      <button class="tab active" data-ask="options">点选（推荐）</button>
+      <button class="tab" data-ask="text">写一句话</button>
     </div>
-    <div id="llmBox" class="llm-box hidden">
-      <input id="llmEndpoint" class="input" value="https://api.deepseek.com/chat/completions" />
-      <input id="llmKey" class="input" type="password" placeholder="DeepSeek API Key（只存在浏览器 localStorage，不外传）" />
+
+    <div id="askOptions">
+      <div class="chip-grid" id="intentChips"></div>
+      <div class="col-row">
+        <label class="col-pick">主列 y<select id="colY"></select></label>
+        <label class="col-pick">对比列 x<select id="colX"></select></label>
+        <label class="col-pick">分组列<select id="colGroup"></select></label>
+      </div>
       <div class="row">
-        <button class="btn ghost" id="saveLLM">保存</button>
-        <span class="hint">没 Key 也能用：自动走本地规则编译，结果完全一致可复现。</span>
+        <button class="btn primary" id="buildBtn" disabled>生成计划</button>
+        <button class="btn ghost" id="clearIntents">清空选项</button>
+        <span class="hint" id="buildHint">先载入数据，再点上面想做的分析</span>
       </div>
     </div>
+
+    <div id="askText" class="hidden">
+      <input id="question" class="input" placeholder="例：这组热敏电阻数据，温度升高是不是真的让阻值下降？有没有要去掉的异常点？帮我出一张能放进报告的图。" />
+      <div class="row">
+        <button class="btn primary" id="compileBtn">编译分析计划</button>
+        <button class="btn ghost" id="askExample" title="填一个示例问题">示例问题</button>
+        <span class="hint" id="compileHint"></span>
+      </div>
+    </div>
+
+    <details class="dsl" id="llmWrap">
+      <summary>配置 LLM（可选）：一句话交给模型编译，输出仍要过白名单校验</summary>
+      <div id="llmBox" class="llm-box">
+        <input id="llmEndpoint" class="input" value="https://api.deepseek.com/chat/completions" />
+        <input id="llmKey" class="input" type="password" placeholder="DeepSeek API Key（只存在浏览器 localStorage，不外传）" />
+        <div class="row">
+          <button class="btn ghost" id="saveLLM">保存</button>
+          <span class="hint">没 Key 也能用：自动走本地规则编译，结果完全一致可复现。</span>
+        </div>
+      </div>
+    </details>
   </section>
 
   <section class="card hidden" id="step3">

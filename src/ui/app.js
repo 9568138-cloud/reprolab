@@ -1,5 +1,5 @@
 import { toDataset } from '../kernel/csv.js';
-import { executePlan } from '../kernel/index.js';
+import { executePlan, validatePlan } from '../kernel/index.js';
 import { compileByRules, compileByLLM, buildClaims, renderClaim } from '../planner.js';
 import { sha256, shortHash } from '../kernel/hash.js';
 import { buildReproducePackage } from '../export/package.js';
@@ -50,6 +50,8 @@ async function loadCsv(text, label = 'CSV') {
     show('datasetInfo', true);
     setStatus(`已载入 ${dataset.rowCount} 行 · 原始层只读`, true);
     show('step3', false); show('step4', false); show('step5', false);
+    fillColumnSelects();
+    renderIntentChips();
     if (numeric.length < 2) {
       toast(`只有 ${numeric.length} 列数值：能出描述统计，但做不了相关/拟合`, 'warn');
     }
@@ -96,18 +98,133 @@ $('question').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); compilePlan(); }
 });
 
-$('toggleLLM').addEventListener('click', () => {
-  const box = $('llmBox');
-  box.classList.toggle('hidden');
-  $('llmKey').value = localStorage.getItem('reprolab.llmKey') || '';
-  $('llmEndpoint').value = localStorage.getItem('reprolab.llmEndpoint') || 'https://api.deepseek.com/chat/completions';
-});
 $('saveLLM').addEventListener('click', () => {
   localStorage.setItem('reprolab.llmKey', $('llmKey').value.trim());
   localStorage.setItem('reprolab.llmEndpoint', $('llmEndpoint').value.trim());
   $('compileHint').textContent = '已保存，下次编译优先走 LLM';
   toast('已保存 LLM 配置（只存在本机浏览器）', 'ok');
 });
+
+// ---------- 02-A 点选模式：勾意图 + 选列 → 生成计划 ----------
+const INTENTS = [
+  { op: 'correlate', label: '相关性', need: 'xy', hint: '两列有多相关：r / n / p' },
+  { op: 'fit_linear', label: '线性拟合', need: 'xy', hint: '斜率、截距、R²' },
+  { op: 'scatter', label: '散点图', need: 'xy', hint: '出图，被剔除的点画成红圈' },
+  { op: 'drop_outliers', label: '剔除异常点', danger: true, hint: 'IQR 规则，会删行，需要人工确认' },
+  { op: 'transform_log', label: '对数变换', hint: '对主列取 ln，适合指数关系' },
+  { op: 'normalize', label: '标准化', hint: 'z-score，方便跨量级比较' },
+  { op: 'group_summary', label: '分组汇总', need: 'group', hint: '按文本列分组求均值/中位数' },
+  { op: 'ttest', label: '两组比较', need: 'group', hint: 'Welch t 检验，看差异显不显著' },
+  { op: 'histogram', label: '分布直方图', hint: '看数据落在哪些区间' },
+  { op: 'trend', label: '时间趋势', hint: '按行序做线性趋势' },
+  { op: 'missing_report', label: '缺失盘点', hint: '数有多少空单元格' },
+];
+const INTENT_ORDER = ['missing_report', 'normalize', 'drop_outliers', 'transform_log', 'group_summary', 'ttest', 'correlate', 'fit_linear', 'trend', 'histogram', 'scatter'];
+const selectedOps = new Set();
+
+function renderIntentChips() {
+  const hasGroup = !!getGroupColumns().length;
+  $('intentChips').innerHTML = INTENTS.map((it) => {
+    const blocked = it.need === 'group' && !hasGroup;
+    const active = selectedOps.has(it.op);
+    return `<button class="intent${active ? ' on' : ''}${it.danger ? ' danger' : ''}${blocked ? ' blocked' : ''}"
+      data-op="${it.op}" ${blocked ? 'disabled' : ''} title="${escapeHtml(it.hint)}">${it.label}</button>`;
+  }).join('');
+  const n = selectedOps.size;
+  $('buildHint').textContent = !state.dataset
+    ? '先载入数据，再点上面想做的分析'
+    : n === 0
+      ? '点上面的按钮选要做的事（可多选），再点「生成计划」'
+      : `已选 ${n} 项：${[...selectedOps].map((op) => labelOf(op)).join('、')}`;
+  $('buildBtn').disabled = !state.dataset || n === 0;
+}
+
+$('intentChips').addEventListener('click', (e) => {
+  const btn = e.target.closest('.intent');
+  if (!btn || btn.disabled) return;
+  const op = btn.dataset.op;
+  selectedOps.has(op) ? selectedOps.delete(op) : selectedOps.add(op);
+  renderIntentChips();
+});
+$('clearIntents').addEventListener('click', () => { selectedOps.clear(); renderIntentChips(); });
+
+function getGroupColumns() {
+  return (state.dataset?.columns || []).filter((c) => c.kind === 'string');
+}
+
+function fillColumnSelects() {
+  const nums = (state.dataset?.columns || []).filter((c) => c.kind === 'number');
+  const groups = getGroupColumns();
+  const opts = nums.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('');
+  $('colY').innerHTML = opts;
+  $('colX').innerHTML = opts;
+  $('colGroup').innerHTML = groups.length
+    ? groups.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('')
+    : '<option value="">（这份数据没有文本列）</option>';
+  // 默认口径：第一列当自变量（温度/循环/时间），第二列当被测量的主列
+  if (nums.length > 1) { $('colX').value = nums[0].name; $('colY').value = nums[1].name; }
+  $('colGroup').disabled = groups.length === 0;
+}
+
+$('buildBtn').addEventListener('click', () => generateFromOptions());
+
+function generateFromOptions() {
+  try {
+    const plan = buildPlanFromOptions();
+    state.plan = plan;
+    renderPlan(plan);
+    show('step3', true);
+    $('step3').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    toast(`已生成 ${plan.steps.length} 步计划`, 'ok');
+    return plan;
+  } catch (err) {
+    toast(`生成失败：${err.message}`, 'error');
+    return null;
+  }
+}
+
+// ---------- 02-B 两种提需求方式切换 ----------
+function switchAskTab(which) {
+  document.querySelectorAll('#askTabs .tab').forEach((b) => b.classList.toggle('active', b.dataset.ask === which));
+  show('askOptions', which === 'options');
+  show('askText', which === 'text');
+}
+$('askTabs').addEventListener('click', (e) => {
+  const tab = e.target.closest('.tab');
+  if (tab) switchAskTab(tab.dataset.ask);
+});
+
+function buildPlanFromOptions() {
+  if (!state.dataset) throw new Error('先载入数据');
+  const y = $('colY').value;
+  const x = $('colX').value;
+  const group = $('colGroup').value;
+  if (!y) throw new Error('没有可选的主列');
+  const picked = INTENT_ORDER.filter((op) => selectedOps.has(op));
+  if (!picked.length) throw new Error('至少选一项');
+
+  const steps = [{ id: 's1', op: 'describe', params: { column: y } }];
+  for (const op of picked) {
+    let params;
+    if (op === 'correlate' || op === 'fit_linear' || op === 'scatter') params = { x, y };
+    else if (op === 'drop_outliers') params = { column: y, k: 1.5, confirm: true };
+    else if (op === 'histogram') params = { column: y, bins: 8 };
+    else if (op === 'group_summary' || op === 'ttest') {
+      if (!group) throw new Error('这份数据没有文本列，分组类分析用不了');
+      params = { groupBy: group, column: y };
+    } else params = { column: y };
+    steps.push({ id: `s${steps.length + 1}`, op, params });
+  }
+
+  const plan = {
+    version: 1,
+    question: [...selectedOps].map((op) => labelOf(op)).join(' + '),
+    engine: 'options',
+    steps,
+  };
+  validatePlan(plan, state.dataset);
+  return plan;
+}
 
 $('compileBtn').addEventListener('click', () => compilePlan());
 
@@ -148,7 +265,10 @@ async function compilePlan() {
 }
 
 function renderPlan(plan) {
-  $('planEngine').textContent = plan.engine === 'llm' ? '来源：LLM 编译（已校验）' : '来源：本地规则编译';
+  $('planEngine').textContent =
+    plan.engine === 'llm' ? '来源：LLM 编译（已校验）'
+      : plan.engine === 'options' ? '来源：点选生成（没有 AI 参与，完全确定）'
+        : '来源：本地规则编译';
   const needsConfirm = plan.steps.some((s) => s.op === 'drop_outliers');
   state.needsConfirm = needsConfirm;
   $('planList').innerHTML = plan.steps.map((s, i) => {
@@ -432,12 +552,16 @@ $('demoBtn').addEventListener('click', async () => {
   $('demoBtn').disabled = true;
   try {
     setStatus('演示中…', true);
+    switchAskTab('options');
     await loadCsv(await (await fetch('./sample-data/thermal.csv')).text(), '示例 thermal.csv');
     await sleep(400);
-    $('question').value = EXAMPLE_QUESTION;
-    await sleep(600);
-    await compilePlan();
-    await sleep(700);
+    // 点选演示：四个意图一次点亮
+    selectedOps.clear();
+    ['correlate', 'drop_outliers', 'fit_linear', 'scatter'].forEach((op) => selectedOps.add(op));
+    renderIntentChips();
+    await sleep(900);
+    generateFromOptions();
+    await sleep(800);
     if (state.needsConfirm) {
       $('confirmDestructive').checked = true;
       syncRunButton();
@@ -449,7 +573,7 @@ $('demoBtn').addEventListener('click', async () => {
     await recheck();
     await sleep(600);
     setStatus('演示完成 · 全程可回溯', true);
-    toast('演示完成：一句话 → 计划 → 确认 → 执行 → 校验', 'ok');
+    toast('演示完成：点选需求 → 计划 → 确认 → 执行 → 校验', 'ok');
   } catch (err) {
     toast(`演示中断：${err.message}`, 'error');
   } finally {
@@ -471,11 +595,14 @@ $('resetBtn').addEventListener('click', () => {
   $('recheckHint').textContent = '';
   $('compileHint').textContent = '';
   show('datasetInfo', false); show('step3', false); show('step4', false); show('step5', false);
+  selectedOps.clear();
+  renderIntentChips();
   setStatus('未载入数据');
   toast('已重置', 'ok');
 });
 
 setStatus('未载入数据');
+renderIntentChips();
 
 // ---------- 模式切换：分析 / 审计 ----------
 const STEP_IDS = ['step1', 'step2', 'step3', 'step4', 'step5'];
