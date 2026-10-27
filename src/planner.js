@@ -11,11 +11,31 @@ const KEYWORDS = [
   { op: 'histogram', words: ['分布', '直方图', '频数', '区间分布'] },
   { op: 'trend', words: ['随时间', '时间序列', '变化趋势', '逐日', '逐行'] },
   { op: 'drop_outliers', words: ['异常', '离群', '野值', '剔除', '去掉', '删掉', '噪'] },
-  { op: 'transform_log', words: ['对数', 'log', 'ln', '指数', '倍数'] },
+  { op: 'transform_log', words: ['对数', 'log', 'ln', '指数关系', '幂', '倍数'] },
   { op: 'correlate', words: ['相关', '关系', '关联', '趋势', '负相关', '正相关', '影响', '下降', '降低', '上升', '升高', '越', '跟着'] },
   { op: 'fit_linear', words: ['拟合', '回归', '斜率', '方程', '线性', '模型', '预测', '拟一条', '拟个', '直线'] },
   { op: 'scatter', words: ['图', '画', '可视化', '散点', '绘图', '放进报告', '曲线'] },
 ];
+
+/** 文本列按「不同取值个数」从少到多排序：城市(70) 比 日期(192) 更适合当分组列 */
+export function groupCandidates(dataset) {
+  return dataset.columns
+    .filter((c) => c.kind === 'string')
+    .map((c) => {
+      const seen = new Set();
+      for (const row of dataset.rows) {
+        const v = String(row[c.index] ?? '').trim();
+        if (v) seen.add(v);
+      }
+      return { name: c.name, card: seen.size, values: [...seen] };
+    })
+    .filter((c) => c.card >= 2)
+    .sort((a, b) => a.card - b.card);
+}
+
+function pickGroupColumn(dataset, excludeName) {
+  return groupCandidates(dataset).filter((c) => c.name !== excludeName)[0] || null;
+}
 
 export function compileByRules(dataset, question) {
   const hits = new Set();
@@ -26,8 +46,10 @@ export function compileByRules(dataset, question) {
   const mentioned = nums.filter((c) => question.includes(c.name));
   const x = mentioned[0]?.name || nums[0].name;
   const y = mentioned[1]?.name || nums[1].name;
-  // 分组类算子需要一个类别列（文本列）；没有就自动跳过，不报错
-  const groupCol = dataset.columns.find((c) => c.kind === 'string' && c.name !== y) || null;
+  // 分组类算子需要一个类别列（文本列）；没有就自动跳过，不报错。
+  // 选「不同取值最少」的那一列：城市(70) 比 日期(192) 更适合当分组。
+  const groupCol = pickGroupColumn(dataset, y);
+  const groupValues = groupCol ? groupCol.values : [];
 
   const wantLog = hits.has('transform_log');
   const steps = [];
@@ -40,7 +62,14 @@ export function compileByRules(dataset, question) {
   if (hits.has('drop_outliers')) push('drop_outliers', { column: y, k: 1.5, confirm: true });
   if (wantLog) push('transform_log', { column: y });
   if (groupCol && hits.has('group_summary')) push('group_summary', { groupBy: groupCol.name, column: y });
-  if (groupCol && hits.has('ttest')) push('ttest', { groupBy: groupCol.name, column: y });
+  if (groupCol && hits.has('ttest')) {
+    // 问题里点了两个具体类别（如「北京和上海」）就直接用它们做两组比较
+    const named = groupValues.filter((v) => question.includes(v)).slice(0, 2);
+    push('ttest', {
+      groupBy: groupCol.name, column: y,
+      ...(named.length === 2 ? { groupA: named[0], groupB: named[1] } : {}),
+    });
+  }
   if (hits.has('correlate') || wantLog) push('correlate', { x, y, ...(wantLog ? { transformY: 'ln' } : {}) });
   if (hits.has('fit_linear') || wantLog) push('fit_linear', { x, y, ...(wantLog ? { transformY: 'ln' } : {}) });
   if (hits.has('trend')) push('trend', { column: y });

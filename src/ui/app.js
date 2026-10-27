@@ -1,6 +1,6 @@
 import { toDataset } from '../kernel/csv.js';
 import { executePlan, validatePlan } from '../kernel/index.js';
-import { compileByRules, compileByLLM, buildClaims, renderClaim } from '../planner.js';
+import { compileByRules, compileByLLM, buildClaims, renderClaim, groupCandidates } from '../planner.js';
 import { sha256, shortHash } from '../kernel/hash.js';
 import { buildReproducePackage } from '../export/package.js';
 import { auditReport, auditToMarkdown } from '../audit.js';
@@ -134,17 +134,7 @@ $('intentChips').addEventListener('click', (e) => {
 $('clearIntents').addEventListener('click', () => { selectedOps.clear(); renderIntentChips(); });
 
 function getGroupColumns() {
-  const cols = (state.dataset?.columns || []).filter((c) => c.kind === 'string');
-  // 分组列按「不同取值个数」从少到多排：城市(70) 比 日期(192) 更适合当分组
-  return cols
-    .map((c) => {
-      const seen = new Set();
-      for (const row of state.dataset.rows) seen.add(String(row[c.index] ?? '').trim());
-      seen.delete('');
-      return { ...c, card: seen.size };
-    })
-    .filter((c) => c.card >= 2)
-    .sort((a, b) => a.card - b.card);
+  return state.dataset ? groupCandidates(state.dataset) : [];
 }
 
 function fillColumnSelects() {

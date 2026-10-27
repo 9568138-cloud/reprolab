@@ -15,7 +15,7 @@
 
 ```bash
 node serve.mjs          # 打开后点右上角「审计」
-# 1) 在「01 数据接入」里载入这份报告对应的原始 CSV（例如 sample-data/iris.csv）
+# 1) 在「01 数据接入」里载入这份报告对应的原始 CSV（例如 sample-data/中国70城房价指数_环比.csv）
 # 2) 点「导入审计案 JSON」，选 tests/fixtures/audit-case.json（一份 5 条结论的报告，其中 1 条数字被改过、1 条引用了不存在的步骤）
 # 3) 点「开始审计」：得到 3 通过 / 1 不符 / 1 无法复现
 ```
@@ -24,13 +24,13 @@ node serve.mjs          # 打开后点右上角「审计」
 
 ```json
 {
-  "title": "鸢尾花数据实验报告",
+  "title": "70 城房价指数月度观察",
   "plan":  { "version": 1, "steps": [ ... ] },      // 这份报告当初用的分析计划
   "claims": [
-    { "text": "花瓣长宽强正相关（r = 0.9629）", "stepId": "s4", "field": "r", "value": 0.9629 },
-    { "text": "数据共分了 4 个物种组", "stepId": "s2", "field": "groupCount", "value": 4 }
+    { "text": "新建与二手住宅指数中等正相关（r = 0.6234）", "stepId": "s4", "field": "r", "value": 0.6234 },
+    { "text": "共覆盖 71 个城市", "stepId": "s2", "field": "groupCount", "value": 71 }
   ],
-  "expectedArtifactHash": "0a79b044…"              // 可选：报告声明的产物哈希
+  "expectedArtifactHash": "248cb8cb…"              // 可选：报告声明的产物哈希
 }
 ```
 
@@ -40,10 +40,10 @@ node serve.mjs          # 打开后点右上角「审计」
 
 ```bash
 # 审计一份报告（有不通过时退出码 1，可直接进 CI）
-node cli.mjs audit tests/fixtures/audit-case.json --data sample-data/iris.csv
+node cli.mjs audit tests/fixtures/audit-case.json --data sample-data/中国70城房价指数_环比.csv
 
 # 只重算产物哈希（给了 data + plan 就能算出该计划的指纹）
-node cli.mjs check sample-data/iris.csv plan.json
+node cli.mjs check sample-data/中国70城房价指数_环比.csv plan.json
 ```
 
 ## 提需求：点选 或 写一句话
@@ -86,8 +86,8 @@ node serve.mjs
 # → http://127.0.0.1:5173
 
 # 3) 浏览器打开后：
-#    把 sample-data/iris.csv 拖进「01 数据接入」（或粘贴 CSV）
-#    → 02 选意图（如 分组汇总 + 两组比较）或写一句话 → 生成计划
+#    把 sample-data/中国70城房价指数_环比.csv 拖进「01 数据接入」（或粘贴 CSV）
+#    → 02 选意图（如 分组汇总 + 相关性）或写一句话 → 生成计划
 #    → 03 勾选确认「剔除异常点」→ 执行
 #    → 04 点结论卡上的数字徽章，跳到对应计算步骤
 #    → 05 重跑一致性校验（两次产物哈希一致）→ 导出复现包 zip
@@ -156,7 +156,11 @@ reprolab/
 │  │  ├─ zip.js             # 最小 ZIP 写入器（store，无依赖）
 │  │  └─ package.js         # 复现包：数据/计划/结果/报告/清单 + 自带 verify.mjs 校验脚本
 │  └─ ui/app.js             # 工作台交互与渲染（点选/一句话、内联提示、DSL 视图、图注）
-├─ sample-data/             # 4 份公开真实数据集（见 sample-data/README.md 的来源与列名映射）
+├─ sample-data/             # 公开真实数据集（来源与列名映射见 sample-data/README.md）
+│  ├─ 中国70城房价指数_环比.csv   # 16,800 行 · 国统局 70 城房价指数（中文列名，主演示数据）
+│  ├─ 中国70城房价指数_同比.csv   # 同上，同比口径
+│  ├─ 中国70城房价指数_定基比.csv # 同上，定基比口径（2011 年起）
+│  ├─ 中国70城房价_2025年12月.csv # 70 行 · 2025-12 横截面
 │  ├─ iris.csv              #   150 行 · 4 数值列 + 物种（3 组）
 │  ├─ faithful.csv          #   272 行 · 间歇泉喷发时长与等待时间
 │  ├─ airpassengers.csv     #   144 行 · 1949–1960 月度客运量

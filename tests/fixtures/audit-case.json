@@ -1,42 +1,42 @@
 {
-  "title": "鸢尾花数据实验报告 · 期末版",
-  "note": "这份报告不是 ReproLab 导出的，是同学手写并抄进文档的条目；其中两条有问题。",
+  "title": "70 城房价指数月度观察 · 报告草稿",
+  "note": "这不是 ReproLab 导出的包，是手写报告的结论条目；其中两条有问题。",
   "plan": {
     "version": 1,
-    "question": "不同物种的花瓣尺寸差异，以及花瓣长宽的相关性",
+    "question": "北京与上海的二手住宅指数差异，以及新建与二手住宅指数的相关性",
     "engine": "options",
     "steps": [
       {
         "id": "s1",
         "op": "describe",
         "params": {
-          "column": "petal_length_cm"
+          "column": "二手住宅指数"
         }
       },
       {
         "id": "s2",
         "op": "group_summary",
         "params": {
-          "groupBy": "species",
-          "column": "petal_length_cm"
+          "groupBy": "城市",
+          "column": "二手住宅指数"
         }
       },
       {
         "id": "s3",
         "op": "ttest",
         "params": {
-          "groupBy": "species",
-          "column": "petal_length_cm",
-          "groupA": "setosa",
-          "groupB": "versicolor"
+          "groupBy": "城市",
+          "column": "二手住宅指数",
+          "groupA": "北京",
+          "groupB": "上海"
         }
       },
       {
         "id": "s4",
         "op": "correlate",
         "params": {
-          "x": "petal_length_cm",
-          "y": "petal_width_cm"
+          "x": "新建商品住宅指数",
+          "y": "二手住宅指数"
         }
       }
     ]
@@ -44,39 +44,39 @@
   "claims": [
     {
       "id": "c1",
-      "text": "花瓣长与花瓣宽强正相关（r = 0.9629）",
+      "text": "新建商品住宅指数与二手住宅指数呈中等正相关（r = 0.6234）",
       "stepId": "s4",
       "field": "r",
-      "value": 0.9629
+      "value": 0.6234
     },
     {
       "id": "c2",
-      "text": "三个物种各 50 个样本",
+      "text": "共覆盖 70 个城市",
       "stepId": "s2",
       "field": "groupCount",
-      "value": 3
+      "value": 70
     },
     {
       "id": "c3",
-      "text": "setosa 与 versicolor 的花瓣长均值差 2.798 cm",
+      "text": "北京与上海的二手住宅指数均值差 0.0846",
       "stepId": "s3",
       "field": "diff",
-      "value": -2.798
+      "value": 0.0846
     },
     {
       "id": "c4",
-      "text": "数据共分了 4 个物种组",
+      "text": "共覆盖 71 个城市",
       "stepId": "s2",
       "field": "groupCount",
-      "value": 4
+      "value": 71
     },
     {
       "id": "c5",
-      "text": "全样本花瓣长度均值 3.76 cm（见附录 B）",
+      "text": "全样本环比指数均值 100.26（见附录三）",
       "stepId": "s9",
       "field": "mean",
-      "value": 3.76
+      "value": 100.26
     }
   ],
-  "expectedArtifactHash": "0a79b044d7924f054916b3b9e8c83f2bd4752090d21ccd177cd0566053547b32"
+  "expectedArtifactHash": "248cb8cb22902a6b6849700eb5d290855e3f6be3a89024c1e8aeba9627dae8b7"
 }
