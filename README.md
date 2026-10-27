@@ -38,7 +38,13 @@ node serve.mjs          # 打开后点右上角「审计」
 
 ## 命令行也能验
 
+```bash
+# 审计一份报告（有不通过时退出码 1，可直接进 CI）
+node cli.mjs audit sample-data/audit-case.json --data sample-data/thermal.csv
 
+# 只重算产物哈希（给了 data + plan 就能算出该计划的指纹）
+node cli.mjs check sample-data/thermal.csv plan.json
+```
 
 ## 快速开始（10 分钟复现）
 
