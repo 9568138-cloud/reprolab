@@ -10,14 +10,16 @@ export class PlanError extends Error {}
 export function validatePlan(plan, dataset) {
   const errors = [];
   if (!plan || typeof plan !== 'object') throw new PlanError('计划必须是对象');
+  // steps 先归一化：缺失/非数组时只报错，不要在下面按数组取值时抛 TypeError
+  const steps = Array.isArray(plan.steps) ? plan.steps : [];
   if (plan.version !== DSL_VERSION) errors.push(`version 必须是 ${DSL_VERSION}`);
-  if (!Array.isArray(plan.steps) || plan.steps.length === 0) errors.push('steps 不能为空');
-  if (plan.steps.length > 12) errors.push('steps 超过 12 步，请拆小问题');
+  if (!Array.isArray(plan.steps) || steps.length === 0) errors.push('steps 不能为空');
+  if (steps.length > 12) errors.push('steps 超过 12 步，请拆小问题');
 
   const columns = new Set(dataset?.columns?.map((c) => c.name) || []);
   const ids = new Set();
 
-  (plan.steps || []).forEach((step, i) => {
+  steps.forEach((step, i) => {
     const at = `steps[${i}]`;
     if (typeof step?.id !== 'string' || !step.id) errors.push(`${at}.id 必填`);
     else if (ids.has(step.id)) errors.push(`${at}.id 重复：${step.id}`);
@@ -39,6 +41,11 @@ export function validatePlan(plan, dataset) {
       if (base === 'string' && columns.size > 0 && ['column', 'x', 'y', 'groupBy'].includes(key) && !columns.has(value)) {
         errors.push(`${at}.params.${key} 不存在列：${value}`);
       }
+    }
+    // 只接受算子声明的参数：往里塞 sql / exec / path 之类的一律拒绝（confirm 是人工确认标记，不算参数）
+    for (const key of Object.keys(step.params || {})) {
+      if (key === 'confirm') continue;
+      if (!(key in spec)) errors.push(`${at}.params.${key} 不是 ${step.op} 的参数（只接受：${Object.keys(spec).join(', ')}）`);
     }
     if (DESTRUCTIVE.has(step.op) && step.params?.confirm !== true) {
       errors.push(`${at} 是破坏性步骤（${step.op}），必须带 confirm: true 由人工确认`);

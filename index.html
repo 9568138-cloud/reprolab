@@ -78,6 +78,7 @@
         <input type="file" id="fileInput" accept=".csv,text/csv" hidden />
         <strong>点击选择 CSV</strong>
         <span>或把文件拖到这里</span>
+        <span class="hint">也支持拖入<strong>复现包 zip</strong>：用包里的数据+计划重跑一遍，和包里的记录对账</span>
       </label>
       <div>
         <textarea id="pasteInput" rows="6" placeholder="也可以直接粘贴 CSV 文本，第一行是表头，例如：&#10;group,value&#10;A,10.2&#10;B,20.1"></textarea>
@@ -88,6 +89,7 @@
       </div>
     </div>
     <div id="datasetInfo" class="dataset-info hidden"></div>
+    <div id="reproResult" class="hidden"></div>
     <div id="dataProfile" class="profile hidden"></div>
     <div id="dataPreview" class="preview hidden"></div>
   </section>
@@ -176,6 +178,14 @@
         <span class="hint">计划是显式 JSON：同一份数据 + 同一份计划，换台机器也能跑出同一哈希。</span>
       </div>
     </details>
+
+    <div class="gate" id="advBox">
+      <div class="row">
+        <button class="btn" id="advRun">试这 9 条越界指令</button>
+        <span class="hint" id="advHint">都是模型可能编出来的样子：越界算子、写错列名、塞 SQL、漏了人工确认……看校验器怎么处理</span>
+      </div>
+      <div id="advResult" class="hidden"></div>
+    </div>
   </section>
 
   <section class="card hidden" id="step4">

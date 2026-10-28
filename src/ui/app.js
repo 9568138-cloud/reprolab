@@ -7,6 +7,9 @@ import { buildReproducePackage } from '../export/package.js';
 import { verifyPackage } from '../export/verify-runner.js';
 import { auditReport, auditBatchToMarkdown, auditToMarkdown, resolveStepField, summarizeAudits } from '../audit.js';
 import { zipStore } from '../export/zip.js';
+import { decodeTextBuffer, encodingNote } from '../kernel/decode.js';
+import { readZip, findEntry } from '../kernel/unzip.js';
+import { runAdversarialCases } from '../adversarial.js';
 
 const $ = (id) => document.getElementById(id);
 const state = { rawCsv: '', dataset: null, plan: null, run: null, claims: [], needsConfirm: false, demo: false };
@@ -32,7 +35,15 @@ function show(id, visible = true) { $(id).classList.toggle('hidden', !visible); 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---------- 01 数据接入 ----------
-async function loadCsv(text, label = 'CSV') {
+/** 读 CSV 文件：先按 UTF-8 严格解码，不是 UTF-8 就按 GB18030（Excel 导出的中文 CSV） */
+async function readCsvFile(file) {
+  const { text, encoding } = decodeTextBuffer(new Uint8Array(await file.arrayBuffer()));
+  const note = encodingNote(encoding);
+  if (note) toast(note, 'ok');
+  return { text, encoding };
+}
+
+async function loadCsv(text, label = 'CSV', encoding = 'UTF-8') {
   try {
     const dataset = toDataset(text);
     state.rawCsv = text;
@@ -47,6 +58,7 @@ async function loadCsv(text, label = 'CSV') {
       `<span class="chip">行数 <b>${dataset.rowCount}</b></span>`,
       `<span class="chip">列数 <b>${dataset.columns.length}</b></span>`,
       `<span class="chip">数值列 <b>${numeric.join(' / ') || '无'}</b></span>`,
+      encoding === 'UTF-8' ? '' : `<span class="chip">编码 <b>${encoding}</b>（已自动转换）</span>`,
       `<span class="chip">SHA-256 <b>${shortHash(hash, 16)}</b></span>`,
     ].join('');
     show('datasetInfo', true);
@@ -68,7 +80,9 @@ async function loadCsv(text, label = 'CSV') {
 
 $('fileInput').addEventListener('change', async (e) => {
   const file = e.target.files?.[0];
-  if (file) loadCsv(await file.text(), file.name);
+  if (!file) return;
+  const { text, encoding } = await readCsvFile(file);
+  loadCsv(text, file.name, encoding);
 });
 
 /** 前 8 行预览：用户上传后第一件事是确认“传对了吗” */
@@ -153,13 +167,112 @@ dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
 dropzone.addEventListener('drop', async (e) => {
   e.preventDefault(); dropzone.classList.remove('drag');
   const file = e.dataTransfer?.files?.[0];
-  if (file) loadCsv(await file.text(), file.name);
+  if (!file) return;
+  // 拖进来的是复现包 zip → 走「一键重跑」，不是当 CSV 解析
+  if (/\.zip$/i.test(file.name) || file.type === 'application/zip') { await loadReproducePackage(file); return; }
+  const { text, encoding } = await readCsvFile(file);
+  loadCsv(text, file.name, encoding);
 });
 $('loadPaste').addEventListener('click', () => {
   const text = $('pasteInput').value.trim();
   if (!text) return toast('先粘贴 CSV 内容', 'warn');
   loadCsv(text, '粘贴');
 });
+
+/**
+ * 拖进来一个复现包：用包里自己的 data.csv + plan.json 重新执行一遍，
+ * 再和包里的 run.json / meta.json 对账（与 verify.mjs 同一套口径，5 项检查）。
+ */
+async function loadReproducePackage(file) {
+  const banner = (cls, title, hint) => {
+    $('reproResult').innerHTML = `<div class="audit-summary ${cls}">
+      <span class="verdict-big">${title}</span><span class="hint">${hint}</span></div>`;
+    show('reproResult', true);
+  };
+  banner('', '正在读复现包…', escapeHtml(file.name));
+  try {
+    const files = await readZip(new Uint8Array(await file.arrayBuffer()));
+    const dec = (b) => new TextDecoder('utf-8').decode(b);
+    const dataBytes = findEntry(files, 'data.csv');
+    const planBytes = findEntry(files, 'plan.json');
+    const runBytes = findEntry(files, 'run.json');
+    const metaBytes = findEntry(files, 'meta.json');
+    if (!dataBytes || !planBytes) throw new Error('包里没有 data.csv 或 plan.json，不像是 ReproLab 的复现包');
+
+    const rawCsv = decodeTextBuffer(dataBytes).text;
+    const plan = JSON.parse(dec(planBytes));
+    const run = runBytes ? JSON.parse(dec(runBytes)) : null;
+    const meta = metaBytes ? JSON.parse(dec(metaBytes)) : null;
+
+    // 载入包里的数据（走正常接入流程，界面状态保持一致）
+    await loadCsv(rawCsv, `${file.name} → data.csv`);
+
+    // 关键一步：不看包里的结论，自己重算一遍
+    const fresh = await executePlan(plan, state.dataset);
+    const sameAsRun = run ? fresh.artifactHash === run.artifactHash : null;
+
+    let checks;
+    let passed;
+    if (run && meta) {
+      const v = await verifyPackage({ rawCsv, plan, run, meta });
+      checks = v.checks;
+      passed = v.passed && sameAsRun !== false;
+    } else {
+      checks = [{ name: '包里带了 data.csv 与 plan.json', pass: true, detail: `${plan.steps.length} 步` }];
+      passed = true;
+    }
+
+    const ops = plan.steps.map((s) => s.op.replace('_rows', '').replace('_', ' ')).join(' → ');
+    $('reproResult').innerHTML = `
+      <div class="audit-summary ${passed ? 'ok' : 'bad'}">
+        <span class="verdict-big">${passed ? '✅ 这份复现包与它的执行记录逐位一致' : '❌ 包里内容与记录对不上'}</span>
+        <span class="hint">${checks.filter((c) => c.pass).length}/${checks.length} 项通过 · 重算产物哈希 <code>${shortHash(fresh.artifactHash, 16)}</code>${sameAsRun === null ? '' : sameAsRun ? '（与包内 run.json 一致）' : '（与包内 run.json 不一致）'}</span>
+      </div>
+      <div class="audit-plan">${escapeHtml(ops)}</div>
+      <table class="audit-table">
+        <thead><tr><th>#</th><th>检查项</th><th>结果</th><th>明细</th></tr></thead>
+        <tbody>${checks.map((c, i) => `<tr class="audit-row ${c.pass ? 'ok' : 'bad'}">
+          <td class="idx">${i + 1}</td>
+          <td>${escapeHtml(c.name)}</td>
+          <td><span class="vchip ${c.pass ? 'ok' : 'bad'}">${c.pass ? 'PASS' : 'FAIL'}</span></td>
+          <td class="why">${escapeHtml(c.detail || '')}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+      <div class="hint">整个过程没有用到包里写的任何结论：数据、计划来自包，结果是我刚重算的。</div>`;
+    show('reproResult', true);
+    setStatus(`已重跑复现包 · ${plan.steps.length} 步`, true);
+    toast(passed ? '复现包校验通过' : '复现包与记录不一致', passed ? 'ok' : 'error');
+  } catch (err) {
+    banner('bad', '❌ 复现包读不了', escapeHtml(err.message));
+    toast(`复现包处理失败：${err.message}`, 'error');
+  }
+}
+
+// ---------- 越界测试：看校验器怎么对付「坏计划」 ----------
+$('advRun').addEventListener('click', () => {
+  if (!state.dataset) return toast('先载入数据（要用真实列名）', 'warn');
+  const rows = runAdversarialCases(state.dataset);
+  const rejected = rows.filter((r) => r.rejected).length;
+  const allPass = rows.every((r) => r.pass);
+  $('advResult').innerHTML = `
+    <div class="audit-summary ${allPass ? 'ok' : 'bad'}">
+      <span class="verdict-big">${allPass ? `✅ ${rejected} 条越界全部被拒，1 条合规照常放行` : '❌ 有反例没被拦住'}</span>
+      <span class="hint">逐条过 validatePlan()，期望与实际一致才算通过</span>
+    </div>
+    <table class="audit-table">
+      <thead><tr><th>#</th><th>模型可能给的指令</th><th>期望</th><th>实际</th><th>为什么</th></tr></thead>
+      <tbody>${rows.map((r, i) => `<tr class="audit-row ${r.pass ? (r.rejected ? 'ok' : 'warn') : 'bad'}">
+        <td class="idx">${i + 1}</td>
+        <td>${escapeHtml(r.title)}<div class="hint">${escapeHtml(r.why)}</div></td>
+        <td>${r.expect === 'rejected' ? '应被拒' : '应放行'}</td>
+        <td><span class="vchip ${r.rejected ? 'bad' : 'ok'}">${r.rejected ? '已拒绝' : '放行'}</span></td>
+        <td class="why">${escapeHtml(r.reason)}</td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+  show('advResult', true);
+  toast(allPass ? '9 条都符合预期' : '有反例没被拦住，得补校验', allPass ? 'ok' : 'error');
+});
+
 // ---------- 02 编译计划 ----------
 $('question').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); compilePlan(); }

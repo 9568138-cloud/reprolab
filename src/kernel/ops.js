@@ -3,6 +3,8 @@ import { describe, pearson, linearFit, correlationPValue, detectOutliers, round,
 import { columnValues, numericValues } from './csv.js';
 
 /** 破坏性算子：涉及删数据，必须人工确认 */
+// 只有「算法自己决定要删行」的算子才强制人工确认；
+// filter_rows 是用户自己给的条件（用户明确写了阈值），不属于算法擅自改动数据。
 export const DESTRUCTIVE = new Set(['drop_outliers']);
 
 /** 取某一列的值 + 行号（沿用 CSV 行号：下标 + 2） */

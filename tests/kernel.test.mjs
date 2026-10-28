@@ -7,6 +7,10 @@ import { compileByRules, buildClaims, renderClaim, withoutDropOutliers } from '.
 import { sha256, stableStringify } from '../src/kernel/hash.js';
 import { buildReproducePackage } from '../src/export/package.js';
 import { auditReport, auditBatchToMarkdown, auditToMarkdown, compareValue, summarizeAudits } from '../src/audit.js';
+import { runAdversarialCases } from '../src/adversarial.js';
+import { decodeTextBuffer } from '../src/kernel/decode.js';
+import { readZip, findEntry } from '../src/kernel/unzip.js';
+import { zipStore } from '../src/export/zip.js';
 
 const read = (f) => readFileSync(new URL(`../sample-data/${f}`, import.meta.url), 'utf8');
 const iris = read('iris.csv');
@@ -521,4 +525,71 @@ test('批量审计：Markdown 汇总里每份一行，结论不通过的那份�
   assert.match(md, /\| 实验室 A 的报告 \| 2 \| 2 \| 0 \| 0 \| 通过 \|/);
   assert.match(md, /\| 实验室 B 的报告 \| 3 \| 1 \| 1 \| 1 \| 不通过 \|/);
   assert.match(md, /中国70城房价指数_环比\.csv/);
+});
+
+// ---------- 越界测试（对抗样例） ----------
+test('越界测试：8 条坏计划全被拒，对照的合规计划照常放行', () => {
+  const rows = runAdversarialCases(ds(iris));
+  assert.equal(rows.length, 9);
+  assert.equal(rows.filter((r) => r.rejected).length, 8);
+  const bad = rows.filter((r) => !r.pass).map((r) => `${r.id}: ${r.reason}`);
+  assert.deepEqual(bad, [], `有反例没被拦住：${bad.join(' / ')}`);
+  const ctrl = rows.find((r) => r.id === 'control_ok');
+  assert.equal(ctrl.rejected, false, '合规计划不该被拒');
+  assert.match(ctrl.reason, /通过校验/);
+});
+
+test('计划校验：参数里夹带 sql 会被点名拒绝', () => {
+  assert.throws(
+    () => validatePlan({ version: 1, steps: [{ id: 's1', op: 'describe', params: { column: 'petal_width_cm', sql: 'DROP TABLE x' } }] }, ds(iris)),
+    /sql 不是 describe 的参数/,
+  );
+});
+
+test('计划校验：steps 缺失或不是数组时报 PlanError，而不是 TypeError', () => {
+  assert.throws(() => validatePlan({ version: 1 }, ds(iris)), (err) => err instanceof PlanError && /steps 不能为空/.test(err.message));
+  assert.throws(() => validatePlan({ version: 1, steps: 'oops' }, ds(iris)), PlanError);
+  assert.throws(() => validatePlan({ version: 1, steps: { length: 3 } }, ds(iris)), PlanError);
+});
+
+// ---------- 编码：Excel 导出的 GBK ----------
+test('编码：GBK 中文 CSV 自动按 GB18030 解码，UTF-8 的照常读', () => {
+  // "city,value\n北京,1\n" —— 北京 = B1 B1 BE A9（GBK）
+  const gbk = new Uint8Array([
+    0x63, 0x69, 0x74, 0x79, 0x2c, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x0a,
+    0xb1, 0xb1, 0xbe, 0xa9, 0x2c, 0x31, 0x0a,
+  ]);
+  const r = decodeTextBuffer(gbk);
+  assert.equal(r.encoding, 'GB18030');
+  assert.match(r.text, /北京,1/);
+  assert.equal(toDataset(r.text).rowCount, 1);
+
+  const utf8 = decodeTextBuffer(new TextEncoder().encode('city,value\n北京,1\n'));
+  assert.equal(utf8.encoding, 'UTF-8');
+  assert.match(utf8.text, /北京,1/);
+});
+
+test('编码：UTF-8 BOM 被去掉（否则第一列名会带不可见字符）', () => {
+  const body = new TextEncoder().encode('city,value\n北京,1\n');
+  const withBom = new Uint8Array([0xef, 0xbb, 0xbf, ...body]);
+  const r = decodeTextBuffer(withBom);
+  assert.equal(r.encoding, 'UTF-8');
+  assert.equal(r.bom, true);
+  assert.ok(r.text.startsWith('city'), 'BOM 之后应直接是表头');
+  assert.equal(r.text.charCodeAt(0), 0x63);
+});
+
+// ---------- 解包：拖进来的复现包 ----------
+test('解包：自己写的 store zip 能读回来，findEntry 按后缀找文件', async () => {
+  const zip = zipStore([
+    { name: 'reprolab/data.csv', text: 'a,b\n1,2\n' },
+    { name: 'reprolab/plan.json', text: '{"version":1,"steps":[]}' },
+    { name: 'reprolab/中文说明.md', text: '# 说明\n' },
+  ]);
+  const files = await readZip(zip);
+  assert.equal(files.size, 3);
+  assert.equal(new TextDecoder().decode(findEntry(files, 'data.csv')), 'a,b\n1,2\n');
+  assert.equal(new TextDecoder().decode(findEntry(files, 'plan.json')), '{"version":1,"steps":[]}');
+  assert.ok(findEntry(files, '中文说明.md'), '中文文件名要能按 UTF-8 读回来');
+  assert.equal(findEntry(files, '不存在.txt'), null);
 });
