@@ -135,15 +135,15 @@
 
 - 缺口：用户想问「只看 30℃ 以上的数据」，但白名单里没有筛选算子，只能全量算。
 
-- 做法：新算子 ，op 支持 > >= < <= == !=；它和「剔除异常点」共用一套行排除机制（），所以下游统计、图表、复现包口径自动一致。
+- 做法：新算子 filter_rows(column, op, value)，op 支持 > >= < <= == !=；它和「剔除异常点」共用一套行排除机制（excludedRows），所以下游统计、图表、复现包口径自动一致。
 
-- 踩到的坑：两张表叠加时行号错 1 ——  返回的是「掩码后数组下标 + 2」，我直接拿它当原始行号去查表，结果整体偏移 1。修法是先转回下标（）再查原始行号表，并补了回归测试（筛选 + 剔除叠加时，剔除行不能落在筛选已排除的行里）。
+- 踩到的坑：两张表叠加时行号错 1 —— detectOutliers 返回的是「掩码后数组下标 + 2」，我直接拿它当原始行号去查表，结果整体偏移 1。修法是先转回下标（r - 2）再查原始行号表，并补了回归测试（筛选 + 剔除叠加时，剔除行不能落在筛选已排除的行里）。
 
-- 口径改造： 统一用 excludedRows；复现包  同时记 excluded/dropped/filtered 三份清单； 重建指纹也跟着改。
+- 口径改造：canonicalArtifact(plan, steps, excludedRows) 统一用 excludedRows；复现包 run.json 同时记 excluded/dropped/filtered 三份清单；verify.mjs 重建指纹也跟着改。
 
-- 实测： → filter_rows → describe → correlate，保留 1479 行；复现包  五项全 PASS（13 个算子内）。
+- 实测：问「只看二手住宅指数大于 101 的数据，算一下相关性」→ filter_rows → describe → correlate，保留 1479 行；复现包跑 node verify.mjs 五项全 PASS（13 个算子内）。
 
-- 结果：commit ，34 条单测全绿
+- 结果：commit [iter 24]，34 条单测全绿
 
 ---
 
