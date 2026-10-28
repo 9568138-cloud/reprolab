@@ -263,3 +263,14 @@ textarea, .input {
 .vchip.warn { color: #ffd27a; border-color: #7a5a2a; }
 
 
+
+/* ---- 界面内自校验 ---- */
+.self-check { margin-top: 12px; border: 1px solid var(--line); border-radius: 10px; background: #0d1428; overflow: hidden; }
+.self-check-head { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.self-check-row { display: grid; grid-template-columns: 56px 1fr auto; gap: 10px; padding: 7px 12px; font-size: 12.5px; border-bottom: 1px solid #16203f; }
+.self-check-row:last-child { border-bottom: 0; }
+.self-check-row span:first-child { font-family: ui-monospace, Consolas, monospace; font-weight: 600; }
+.self-check-row.ok span:first-child { color: #7be0c4; }
+.self-check-row.bad { background: rgba(255, 107, 107, .08); }
+.self-check-row.bad span:first-child { color: #ff9b9b; }
+.self-check-row .why { color: var(--muted); font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; }

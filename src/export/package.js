@@ -5,7 +5,7 @@ import { canonicalArtifact } from '../kernel/index.js';
 import { OPERATORS } from '../kernel/ops.js';
 import { renderClaim } from '../planner.js';
 
-export async function buildReproducePackage({ rawCsv, dataset, plan, run, claims, meta = {} }) {
+export async function buildReproducePackage({ rawCsv, dataset, plan, run, claims, meta = {}, chartSvg = null }) {
   const dataHash = await sha256(rawCsv);
   const rendered = claims.map((c) => ({ ...c, text: renderClaim(c, run.steps) }));
   const artifact = canonicalArtifact(plan, run.steps, run.excludedRows);
@@ -68,6 +68,7 @@ export async function buildReproducePackage({ rawCsv, dataset, plan, run, claims
     '| `meta.json` | 数据哈希、产物哈希、生成时间、编译器 |',
     '| `report.md` | 本报告 |',
     '| `verify.mjs` | 零依赖自校验脚本 |',
+    ...(chartSvg ? ['| `chart.svg` | 本次分析的图表（矢量，可直接放进报告） |'] : []),
     '',
   ].join('\n');
 
@@ -96,6 +97,7 @@ export async function buildReproducePackage({ rawCsv, dataset, plan, run, claims
       }, null, 2),
     },
     { name: 'report.md', text: report },
+    ...(chartSvg ? [{ name: 'chart.svg', text: chartSvg }] : []),
     { name: 'verify.mjs', text: verifyScript() },
   ];
   return { files, report, dataHash, artifactHash: run.artifactHash, artifact, claims: rendered };

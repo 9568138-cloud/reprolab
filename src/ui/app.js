@@ -4,6 +4,7 @@ import { executePlan, validatePlan } from '../kernel/index.js';
 import { compileByRules, compileByLLM, buildClaims, renderClaim, groupCandidates, withoutDropOutliers } from '../planner.js';
 import { sha256, shortHash } from '../kernel/hash.js';
 import { buildReproducePackage } from '../export/package.js';
+import { verifyPackage } from '../export/verify-runner.js';
 import { auditReport, auditToMarkdown, resolveStepField } from '../audit.js';
 import { zipStore } from '../export/zip.js';
 
@@ -747,7 +748,9 @@ $('exportBtn').addEventListener('click', async () => {
   if (!state.run) return toast('先执行一次计划', 'warn');
   const pkg = await buildReproducePackage({
     rawCsv: state.rawCsv, dataset: state.dataset, plan: state.plan, run: state.run,
-    claims: state.claims, meta: { question: state.plan.question, engine: state.plan.engine },
+    claims: state.claims,
+    meta: { question: state.plan.question, engine: state.plan.engine },
+    chartSvg: currentChartSvg(),
   });
   const bytes = zipStore(pkg.files, new Date());
   const blob = new Blob([bytes], { type: 'application/zip' });
@@ -760,6 +763,41 @@ $('exportBtn').addEventListener('click', async () => {
   $('hashBox').textContent = `已导出 ${pkg.files.length} 个文件\n数据 SHA-256：${pkg.dataHash}\n产物哈希：${pkg.artifactHash}\n解压后执行 node verify.mjs 可离线自校验。`;
   toast(`复现包已导出（${pkg.files.length} 个文件，含 verify.mjs）`, 'ok');
 });
+
+// ---------- 界面内自校验复现包 ----------
+/** 当前图表转 SVG 字符串（放进复现包） */
+function currentChartSvg() {
+  const svg = document.querySelector('#chart svg');
+  return svg ? new XMLSerializer().serializeToString(svg) : null;
+}
+
+$('selfCheckBtn').addEventListener('click', () => selfCheck());
+
+async function selfCheck() {
+  if (!state.run) return toast('先执行一次计划', 'warn');
+  const box = $('selfCheckBox');
+  box.innerHTML = '<div class="hint">校验中…</div>';
+  show('selfCheckBox', true);
+  try {
+    const pkg = await buildReproducePackage({
+      rawCsv: state.rawCsv,
+      dataset: state.dataset,
+      plan: state.plan,
+      run: state.run,
+      claims: state.claims,
+      meta: { question: state.plan.question, engine: state.plan.engine },
+      chartSvg: currentChartSvg(),
+    });
+    const meta = JSON.parse(pkg.files.find((f) => f.name === 'meta.json').text);
+    const { checks, passed } = await verifyPackage({ rawCsv: state.rawCsv, plan: state.plan, run: state.run, meta });
+    box.innerHTML = `<div class="self-check-head"><b>${passed ? '✓ 全部通过' : '✗ 有不通过项'}</b><span class="hint">与导出的复现包里 verify.mjs 做同一套检查</span></div>` +
+      checks.map((c) => `<div class="self-check-row ${c.pass ? 'ok' : 'bad'}"><span>${c.pass ? 'PASS' : 'FAIL'}</span><span>${escapeHtml(c.name)}</span><span class="why">${escapeHtml(c.detail)}</span></div>`).join('');
+    toast(passed ? '自校验全部通过' : '自校验发现不一致', passed ? 'ok' : 'error');
+  } catch (err) {
+    box.innerHTML = `<div class="hint bad">校验失败：${escapeHtml(err.message)}</div>`;
+    toast(`自校验失败：${err.message}`, 'error');
+  }
+}
 
 // ---------- 分析报告导出（HTML，可直接打印成 PDF） ----------
 $('exportReport').addEventListener('click', () => {

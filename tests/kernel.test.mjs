@@ -383,3 +383,35 @@ test('条件筛选：非法比较符在执行期被拒绝', async () => {
     /不支持的条件/,
   );
 });
+
+// ---------- 界面内自校验（与 verify.mjs 同口径） ----------
+test('自校验：正常包全部通过，篡改 run 则失败', async () => {
+  const { verifyPackage } = await import('../src/export/verify-runner.js');
+  const d = ds(iris);
+  const plan = compileByRules(d, 'petal_length_cm 和 petal_width_cm 的关系，出图');
+  const run = await executePlan(plan, d);
+  const claims = buildClaims(plan, run.steps);
+  const pkg = await buildReproducePackage({ rawCsv: iris, dataset: d, plan, run, claims, meta: {} });
+  const meta = JSON.parse(pkg.files.find((f) => f.name === 'meta.json').text);
+
+  const ok = await verifyPackage({ rawCsv: iris, plan, run, meta });
+  assert.equal(ok.passed, true);
+  assert.equal(ok.checks.length, 5);
+
+  // 篡改：改掉 run 里某个步骤的输出（模拟手改 run.json）
+  const tampered = { ...run, steps: run.steps.map((s, i) => (i === run.steps.length - 1 ? { ...s, output: { ...s.output, count: 999 } } : s)) };
+  const bad = await verifyPackage({ rawCsv: iris, plan, run: tampered, meta });
+  assert.equal(bad.passed, false);
+  assert.ok(bad.checks.some((c) => !c.pass && c.name.includes('产物哈希')));
+});
+
+test('复现包：带图表时多一个 chart.svg', async () => {
+  const d = ds(iris);
+  const plan = compileByRules(d, 'petal_length_cm 和 petal_width_cm 的关系，出图');
+  const run = await executePlan(plan, d);
+  const claims = buildClaims(plan, run.steps);
+  const withChart = await buildReproducePackage({ rawCsv: iris, dataset: d, plan, run, claims, meta: {}, chartSvg: '<svg xmlns="http://www.w3.org/2000/svg"></svg>' });
+  assert.ok(withChart.files.some((f) => f.name === 'chart.svg'));
+  const noChart = await buildReproducePackage({ rawCsv: iris, dataset: d, plan, run, claims, meta: {} });
+  assert.ok(!noChart.files.some((f) => f.name === 'chart.svg'));
+});
