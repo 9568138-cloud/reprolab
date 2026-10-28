@@ -3,7 +3,7 @@ import { executePlan, validatePlan } from '../kernel/index.js';
 import { compileByRules, compileByLLM, buildClaims, renderClaim, groupCandidates, withoutDropOutliers } from '../planner.js';
 import { sha256, shortHash } from '../kernel/hash.js';
 import { buildReproducePackage } from '../export/package.js';
-import { auditReport, auditToMarkdown } from '../audit.js';
+import { auditReport, auditToMarkdown, resolveStepField } from '../audit.js';
 import { zipStore } from '../export/zip.js';
 
 const $ = (id) => document.getElementById(id);
@@ -356,6 +356,7 @@ async function runPlan() {
     renderChart(run);
     $('hashBox').textContent = `产物总哈希：${run.artifactHash}`;
     show('step4', true); show('step5', true);
+    syncAuditButtons();
     setStatus(`执行完成 · ${run.steps.length} 步 · 已留痕`, true);
     $('runHint').textContent = '';
     $('step4').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -679,6 +680,7 @@ $('resetBtn').addEventListener('click', () => {
   selectedOps.clear();
   state.run = null;
   renderIntentChips();
+  syncAuditButtons();
   setStatus('未载入数据');
   toast('已重置', 'ok');
 });
@@ -696,6 +698,7 @@ function setMode(mode) {
   if (mode === 'audit') {
     show('step1', true); ['step2','step3','step4','step5'].forEach((id) => show(id, false));
     show('auditPanel', true);
+    syncAuditButtons();
     if (!state.dataset) toast('审计需要数据：先在「01 数据接入」里载入这份报告对应的 CSV', 'warn');
   } else {
     show('auditPanel', false);
@@ -704,6 +707,10 @@ function setMode(mode) {
   }
 }
 
+/** 审计按钮是否可用：需要数据 +（审计案 or 当前分析结果） */
+function syncAuditButtons() {
+  $('auditFromRun').disabled = !(state.plan && state.run && state.claims.length);
+}
 $('modeSwitch').addEventListener('click', (e) => {
   const btn = e.target.closest('.mode');
   if (btn) setMode(btn.dataset.mode);
@@ -762,9 +769,53 @@ $('auditFile').addEventListener('change', async (e) => {
   catch { toast('不是合法的 JSON 文件', 'error'); }
 });
 
+$('auditFromRun').addEventListener('click', () => {
+  const c = auditCaseFromRun();
+  if (!c) return toast('先在「分析」里跑一次，再来生成审计案', 'warn');
+  $('auditJson').value = JSON.stringify(c, null, 2);
+  $('auditJsonWrap').open = true;
+  loadAuditCase(c, '当前分析结果');
+});
+
+$('auditUseJson').addEventListener('click', () => {
+  try {
+    const c = JSON.parse($('auditJson').value);
+    loadAuditCase(c, '文本框');
+    runAudit();
+  } catch (e) { toast(`JSON 不合法：${e.message}`, 'error'); }
+});
+
+/** 拿当前会话的分析结果生成一份审计案（只取能重算的数字字段，保证不会自己判自己无法复现） */
+function auditCaseFromRun() {
+  if (!state.plan || !state.run || !state.claims.length) return null;
+  const byId = new Map(state.run.steps.map((s) => [s.id, s]));
+  const claims = [];
+  for (const c of state.claims) {
+    for (const r of c.refs) {
+      const step = byId.get(r.stepId);
+      const actual = resolveStepField(step, r.field);
+      if (typeof actual !== 'number') continue;
+      claims.push({ text: `${labelOf(step.op)} · ${r.field}`, stepId: r.stepId, field: r.field, value: actual });
+    }
+  }
+  if (!claims.length) return null;
+  return {
+    title: `${state.plan.question || '本次分析'} · 自动生成`,
+    note: '由当前会话的分析结果生成，用于验证「自己验自己」的闭环。',
+    plan: state.plan,
+    claims,
+    expectedArtifactHash: state.run.artifactHash,
+  };
+}
+
 $('auditRun').addEventListener('click', () => runAudit());
 
 async function runAudit() {
+  const raw = ($('auditJson')?.value || '').trim();
+  if (raw) {
+    try { auditCase = JSON.parse(raw); }
+    catch (e) { return toast(`审计案 JSON 不合法：${e.message}`, 'error'); }
+  }
   if (!auditCase) return toast('先载入一份审计案', 'warn');
   $('auditRun').disabled = true;
   $('auditHint').textContent = '重算中…';
@@ -815,6 +866,7 @@ function renderAudit(results, summary) {
     </table>
     <div class="row">
       <button class="btn ghost" id="auditCopy">复制审计报告（Markdown）</button>
+      <button class="btn ghost" id="auditExport">导出审计报告（HTML）</button>
       <span class="hint">审计只重算、不改数据；每条差异都写明是哪个步骤的哪个字段。</span>
     </div>`;
   show('auditResult', true);
@@ -824,6 +876,56 @@ function renderAudit(results, summary) {
     try { await navigator.clipboard.writeText(md); toast('审计报告已复制', 'ok'); }
     catch { toast('复制失败，可手动选中表格', 'warn'); }
   });
+
+  $('auditExport').addEventListener('click', () => {
+    const html = auditHtmlReport({ title: auditCase?.title || '报告审计结果', summary, results, dataset: state.dataset });
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `审计报告-${new Date().toISOString().slice(0, 10)}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('审计报告已导出（可用浏览器打印成 PDF）', 'ok');
+  });
+}
+
+/** 审计结果 → 可打印的独立 HTML（浅色，打印/存 PDF 都好看） */
+function auditHtmlReport({ title, summary, results, dataset }) {
+  const chip = {
+    ok: ['通过', '#0f7b4f', '#e6f7ef'],
+    mismatch: ['不符', '#b42318', '#fdecea'],
+    unreproducible: ['无法复现', '#8a5a00', '#fff6e5'],
+  };
+  const rows = results.map((r, i) => {
+    const [label, color, bg] = chip[r.verdict];
+    const declared = r.declared === undefined ? '—' : String(r.declared);
+    const actual = r.actual === undefined ? '—' : String(typeof r.actual === 'number' ? Number(r.actual.toFixed(6)) : r.actual);
+    return `<tr><td>${i + 1}</td><td>${escapeHtml(r.text)}</td><td class="num">${declared}</td><td class="num">${actual}</td><td><span class="chip" style="color:${color};background:${bg}">${label}</span></td><td class="why">${escapeHtml(r.reason || '')}</td></tr>`;
+  }).join('');
+  const hashNote = summary.hashMatches === null ? '' : summary.hashMatches ? '（与报告声明一致）' : '（与报告声明不一致）';
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
+<style>
+body{font-family:"Segoe UI","Microsoft YaHei",sans-serif;max-width:960px;margin:40px auto;padding:0 24px;color:#1b2333}
+h1{font-size:22px;margin:0 0 6px}
+.meta{color:#5b6577;font-size:13px;margin-bottom:20px}
+.banner{padding:12px 16px;border-radius:10px;margin:16px 0;font-weight:600}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:8px 10px;border-bottom:1px solid #e3e7ef;text-align:left;vertical-align:top}
+th{color:#5b6577;font-size:12px}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+td.why{color:#5b6577;font-size:12px}
+.chip{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px}
+code{background:#f3f4f7;padding:1px 6px;border-radius:4px;font-size:12px}
+footer{margin-top:28px;color:#8a93a5;font-size:12px}
+@media print{body{margin:0}}
+</style></head><body>
+<h1>${escapeHtml(title)}</h1>
+<div class="meta">审计时间 ${new Date().toLocaleString('zh-CN')}　·　数据集 ${dataset ? dataset.rowCount : '?'} 行　·　重算产物哈希 <code>${summary.artifactHash.slice(0, 24)}…</code>${hashNote}</div>
+<div class="banner" style="background:${summary.passed ? '#e6f7ef' : '#fdecea'};color:${summary.passed ? '#0f7b4f' : '#b42318'}">${summary.passed ? '✓ 全部通过' : '✗ 存在对不上的结论'}：共 ${summary.total} 条，通过 ${summary.ok} · 不符 ${summary.mismatch} · 无法复现 ${summary.unreproducible}</div>
+<table><thead><tr><th>#</th><th>报告里的结论</th><th>报告值</th><th>重算值</th><th>判定</th><th>说明</th></tr></thead><tbody>${rows}</tbody></table>
+<footer>由溯真 ReproLab 生成：每条判定都用「原始数据 + 分析计划」重新执行得到，可用 reprolab 命令行复现。</footer>
+</body></html>`;
 }
 
 function escapeHtml(s) {

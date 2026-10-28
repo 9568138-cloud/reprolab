@@ -52,9 +52,15 @@
     <div class="row">
       <input type="file" id="auditFile" accept=".json,application/json" hidden />
       <button class="btn" id="auditPick">导入审计案 JSON</button>
+      <button class="btn ghost" id="auditFromRun" disabled title="拿刚才分析出来的结论生成一份审计案">用刚才的分析生成审计案</button>
       <button class="btn primary" id="auditRun" disabled>开始审计</button>
       <span class="hint" id="auditHint"></span>
     </div>
+    <details class="dsl" id="auditJsonWrap">
+      <summary>审计案 JSON（可直接粘贴或编辑；改一个数字就能看它报不一致）</summary>
+      <textarea id="auditJson" rows="10" spellcheck="false" placeholder="在这里粘贴审计案 JSON，或点上面「用刚才的分析生成审计案」自动填。"></textarea>
+      <div class="row"><button class="btn ghost" id="auditUseJson">用这段 JSON 审计</button><span class="hint">格式：{title, plan, claims:[{text, stepId, field, value}], expectedArtifactHash?}</span></div>
+    </details>
     <div id="auditCase" class="audit-case hidden"></div>
     <div id="auditResult" class="audit-result hidden"></div>
   </section>
