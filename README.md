@@ -36,6 +36,24 @@ node serve.mjs          # 打开后点右上角「审计」
 
 判定规则：数值允许 0.1% 相对误差（报告通常四舍五入到 4 位）；差异超过则是**不符**；步骤或字段找不到是**无法复现**；声明的产物哈希对不上，整体不通过。
 
+## 批量审计：一叠报告一次审完
+
+一个课题组交上来 5 份报告，不用一份份点：**「导入审计案 JSON」支持多选**，一次全选。
+
+- 出一张汇总表：每份报告的结论数 / 通过 / 不符 / 无法复现 / 判定；
+- 顶部一行总账：「❌ 2 / 5 份报告存在对不上的结论 · 共 37 条结论 · 通过 33 · 不符 3 · 无法复现 1」；
+- 点某一份后面的「看明细」，直接看它逐条差在哪个字段；
+- 汇总可复制 / 下载 Markdown（`批量审计汇总.md`），贴进整改通知或直接打印。
+
+前提：这几份报告用的是**同一份原始数据**（界面上方载入的那份）。命令行同样支持：
+
+```bash
+node cli.mjs audit 报告A.json 报告B.json 报告C.json --data sample-data/中国70城房价指数_环比.csv
+# 有一份不通过就退出码 1，可直接卡 CI
+```
+
+![批量审计](docs/ui-10-batch-audit.png)
+
 ## 命令行也能验
 
 ```bash
@@ -92,6 +110,16 @@ node cli.mjs check sample-data/中国70城房价指数_环比.csv plan.json
 来源、许可与列名映射写在 [sample-data/README.md](sample-data/README.md)；原始文件可到数据源逐行核对。想用自己的数据，把 CSV 拖进界面即可。
 
 ## 快速开始（10 分钟复现）
+
+### Windows 一键启动（不想开终端就用这个）
+
+双击 **`ReproLab.cmd`**：自动后台起服务 + 打开浏览器；**已经在跑就直接开浏览器**，不会起第二个。
+
+- 停止服务：双击 **`StopReproLab.cmd`**（按端口结束进程，默认 5173）
+- 换端口：`node start.mjs 8080`，或先 `set REPROLAB_PORT=8080` 再双击
+- 服务日志在同目录 `serve.log`；这个 .cmd 干的就是 `node start.mjs`
+
+其他系统、或者想看服务日志时，用下面的命令：
 
 ```bash
 # 1) 环境：只需要 Node.js ≥ 20（无 npm 依赖、无构建步骤）
@@ -157,7 +185,10 @@ node serve.mjs
 reprolab/
 ├─ index.html               # 单页工作台
 ├─ serve.mjs                # 零依赖静态服务器
-├─ cli.mjs                  # 命令行：audit / check，可进 CI
+├─ start.mjs                # 一键启动：起服务 + 开浏览器（已在跑就只开浏览器）
+├─ ReproLab.cmd             # Windows 双击启动
+├─ StopReproLab.cmd         # Windows 双击停止
+├─ cli.mjs                  # 命令行：audit（可批量）/ check，可进 CI
 ├─ src/
 │  ├─ styles.css
 │  ├─ planner.js            # 自然语言 → 计划 DSL；结论卡生成与校验
@@ -182,20 +213,20 @@ reprolab/
 │  ├─ airpassengers.csv     #   144 行 · 1949–1960 月度客运量
 │  └─ airquality.csv        #   153 行 · 纽约空气质量，含 37 个缺失值
 ├─ tests/
-│  ├─ kernel.test.mjs       # 39 条单测（node --test 或直接 node 运行）
+│  ├─ kernel.test.mjs       # 42 条单测（node --test 或直接 node 运行）
 │  └─ fixtures/audit-case.json # 审计测试用"一份报告"（5 条结论，1 条被改、1 条缺步骤）
 ├─ demo/视频分镜.md          # 5–8 分钟演示视频的分镜与口播要点
 ├─ docs/                    # 界面截图、技术文档、提交清单
-└─ prompts/                 # AI 协同过程记录（28 个 [iter] 提交 + 4 张真界面截图）
+└─ prompts/                 # AI 协同过程记录（29 个 [iter] 提交 + 4 张真界面截图）
 ```
 
 ## 测试
 
 ```bash
 node tests/kernel.test.mjs
-# 39 tests / 39 pass：解析、白名单、破坏性算子确认、可复现哈希、异常点、相关性、审计三态、
+# 42 tests / 42 pass：解析、白名单、破坏性算子确认、可复现哈希、异常点、相关性、审计三态、
 #                      结论溯源、删除清单一致性、删行后统计口径、复现包指纹可重算、
-#                      条件筛选叠加剔除的行号回归、界面自校验、文本列筛选、带单位列转数值等
+#                      条件筛选叠加剔除的行号回归、界面自校验、文本列筛选、带单位列转数值、批量审计汇总等
 ```
 
 ## 可复现性怎么证明
