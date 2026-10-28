@@ -10,6 +10,7 @@ import { zipStore } from '../export/zip.js';
 import { decodeTextBuffer, encodingNote } from '../kernel/decode.js';
 import { readZip, findEntry } from '../kernel/unzip.js';
 import { runAdversarialCases } from '../adversarial.js';
+import { runSensitivity, verdictText } from '../sensitivity.js';
 
 const $ = (id) => document.getElementById(id);
 const state = { rawCsv: '', dataset: null, plan: null, run: null, claims: [], needsConfirm: false, demo: false };
@@ -994,6 +995,67 @@ async function selfCheck() {
   } catch (err) {
     box.innerHTML = `<div class="hint bad">校验失败：${escapeHtml(err.message)}</div>`;
     toast(`自校验失败：${err.message}`, 'error');
+  }
+}
+
+// ---------- 敏感性检验：换个参数，结论还成立吗 ----------
+$('sensitivityBtn').addEventListener('click', () => runSens());
+
+async function runSens() {
+  if (!state.run || !state.plan) return toast('先执行一次计划', 'warn');
+  const box = $('sensBox');
+  box.innerHTML = '<div class="hint">逐个扰动参数、重跑中…</div>';
+  show('sensBox', true);
+  try {
+    const res = await runSensitivity({ dataset: state.dataset, plan: state.plan, baseline: state.run });
+    if (!res.variants.length) {
+      box.innerHTML = `<div class="self-check-head"><b>没有可调参数</b><span class="hint">${escapeHtml(verdictText('none'))}</span></div>`;
+      toast('这个计划里没有可调的数值参数', 'warn');
+      return;
+    }
+    const kind = { robust: 'ok', borderline: 'warn', fragile: 'bad' }[res.verdict];
+    const head = `<div class="self-check-head"><b class="${kind === 'bad' ? 'bad' : ''}">${res.verdict === 'robust' ? '✓ 结论稳健' : res.verdict === 'borderline' ? '△ 轻微敏感' : '✗ 结论不稳'}</b>
+      <span class="hint">${escapeHtml(verdictText(res.verdict))} · 最大漂移 ${(res.maxDrift * 100).toFixed(1)}% · 翻盘 ${res.flips} 处</span></div>`;
+
+    const wit = res.witnesses.slice(0, 4);
+    const fmt = (v) => (v === null ? '—' : Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(4).replace(/0+$/, '').replace(/\.$/, ''));
+    const rows = res.variants.map((r) => {
+      if (r.error) {
+        return `<tr class="audit-row bad"><td>${escapeHtml(r.label)}</td><td colspan="${wit.length}">跑不起来：${escapeHtml(r.error)}</td><td>—</td><td><span class="vchip bad">失败</span></td></tr>`;
+      }
+      const judged = r.cells.filter((c) => c.judged);
+      const worst = judged.length ? Math.max(...judged.map((c) => c.drift ?? 0)) : null;
+      const cellHtml = wit.map((w) => {
+        const c = r.cells.find((x) => x.label === w.label);
+        if (!c || c.value === null) return '<td class="num">—</td>';
+        // 过程量（样本量、剔除点数）只展示、不判颜色
+        const cls = !c.judged ? 'hint' : (c.drift ?? 0) > 0.25 || c.flip ? 'bad' : (c.drift ?? 0) > 0.05 ? 'warn' : '';
+        const tip = w.judged ? (c.drift > 0.0005 ? `（${(c.drift * 100).toFixed(1)}%）` : '') : '（过程量）';
+        return `<td class="num ${cls}">${fmt(c.value)}${tip ? `<span class="hint">${tip}</span>` : ''}</td>`;
+      }).join('');
+      const flip = judged.some((c) => c.flip);
+      const chipKind = flip ? 'bad' : worst === null ? 'warn' : worst > 0.05 ? 'warn' : 'ok';
+      const chipText = flip ? '翻盘' : worst === null ? '无可判项' : worst > 0.05 ? '漂移' : '稳定';
+      return `<tr class="audit-row ${chipKind}">
+        <td>${escapeHtml(r.label)}</td>${cellHtml}
+        <td class="num">${worst === null ? '—' : (worst * 100).toFixed(1) + '%'}</td>
+        <td><span class="vchip ${chipKind}">${chipText}</span></td>
+      </tr>`;
+    }).join('');
+
+    box.innerHTML = `${head}
+      <table class="audit-table">
+        <thead><tr><th>换个什么参数</th>${wit.map((w) => `<th>${escapeHtml(w.label)}</th>`).join('')}<th>最大漂移</th><th>判定</th></tr></thead>
+        <tbody>
+          <tr class="audit-row"><td><b>原计划（基线）</b></td>${wit.map((w) => `<td class="num">${fmt(w.value)}</td>`).join('')}<td class="num">0%</td><td><span class="vchip ok">基准</span></td></tr>
+          ${rows}
+        </tbody>
+      </table>
+      <div class="hint">只改这一个参数，数据、计划和算子都没动；每次重跑都重新执行，不是估算。标「过程量」的列（样本量、剔除点数）本来就会跟着变，不参与稳健性判定。</div>`;
+    toast(res.verdict === 'robust' ? '结论稳健' : res.verdict === 'borderline' ? '结论轻微敏感' : '换参数后结论会变，得在报告里写明', res.verdict === 'fragile' ? 'warn' : 'ok');
+  } catch (err) {
+    box.innerHTML = `<div class="hint bad">敏感性检验失败：${escapeHtml(err.message)}</div>`;
+    toast(`敏感性检验失败：${err.message}`, 'error');
   }
 }
 

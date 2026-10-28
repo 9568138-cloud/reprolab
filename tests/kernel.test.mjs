@@ -8,6 +8,7 @@ import { sha256, stableStringify } from '../src/kernel/hash.js';
 import { buildReproducePackage } from '../src/export/package.js';
 import { auditReport, auditBatchToMarkdown, auditToMarkdown, compareValue, summarizeAudits } from '../src/audit.js';
 import { runAdversarialCases } from '../src/adversarial.js';
+import { buildVariants, runSensitivity, driftOf, verdictText } from '../src/sensitivity.js';
 import { decodeTextBuffer } from '../src/kernel/decode.js';
 import { readZip, findEntry } from '../src/kernel/unzip.js';
 import { zipStore } from '../src/export/zip.js';
@@ -592,4 +593,83 @@ test('解包：自己写的 store zip 能读回来，findEntry 按后缀找文�
   assert.equal(new TextDecoder().decode(findEntry(files, 'plan.json')), '{"version":1,"steps":[]}');
   assert.ok(findEntry(files, '中文说明.md'), '中文文件名要能按 UTF-8 读回来');
   assert.equal(findEntry(files, '不存在.txt'), null);
+});
+
+// ---------- 敏感性检验：换个参数，结论还成立吗 ----------
+test('敏感性：只扰动可调参数，一次只改一个，confirm 保留', () => {
+  const plan = {
+    version: 1,
+    steps: [
+      { id: 's1', op: 'describe', params: { column: 'petal_length_cm' } },
+      { id: 's2', op: 'drop_outliers', params: { column: 'petal_length_cm', k: 1.5, confirm: true } },
+      { id: 's3', op: 'correlate', params: { x: 'sepal_length_cm', y: 'petal_length_cm' } },
+    ],
+  };
+  const vs = buildVariants(plan);
+  assert.equal(vs.length, 3, 'k = 1.0 / 2.0 / 3.0 三个变体');
+  for (const v of vs) {
+    const changed = v.plan.steps.filter((s, i) => JSON.stringify(s) !== JSON.stringify(plan.steps[i]));
+    assert.equal(changed.length, 1, '一次只能改一个步骤');
+    assert.equal(changed[0].op, 'drop_outliers');
+    assert.notEqual(changed[0].params.k, 1.5);
+    assert.equal(changed[0].params.confirm, true, 'confirm 不能被扰动掉');
+  }
+});
+
+test('敏感性：没有可调参数的计划给出 none，而不是假「稳健」', async () => {
+  const plan = { version: 1, steps: [{ id: 's1', op: 'correlate', params: { x: 'sepal_length_cm', y: 'petal_length_cm' } }] };
+  const run = await executePlan(plan, ds(iris));
+  const res = await runSensitivity({ dataset: ds(iris), plan, baseline: run });
+  assert.equal(res.variants.length, 0);
+  assert.equal(res.verdict, 'none');
+  assert.match(verdictText('none'), /没有可调参数/);
+});
+
+test('敏感性：剔除倍数改成 1/2/3 后重跑，给出漂移与三档判定', async () => {
+  const d = ds(iris);
+  const plan = {
+    version: 1,
+    steps: [
+      { id: 's1', op: 'drop_outliers', params: { column: 'petal_length_cm', k: 1.5, confirm: true } },
+      { id: 's2', op: 'correlate', params: { x: 'sepal_length_cm', y: 'petal_length_cm' } },
+    ],
+  };
+  const run = await executePlan(plan, d);
+  const res = await runSensitivity({ dataset: d, plan, baseline: run });
+  assert.equal(res.variants.length, 3);
+  assert.ok(res.witnesses.some((w) => w.field === 'r'), '相关性系数要作为被检验的结论');
+  assert.ok(['robust', 'borderline', 'fragile'].includes(res.verdict));
+  for (const v of res.variants) {
+    assert.equal(v.error, null);
+    const r = v.cells.find((c) => c.field === 'r');
+    assert.equal(typeof r.drift, 'number');
+    assert.ok(r.drift >= 0);
+  }
+});
+
+test('漂移计算：以基线为参照，基线为 0 时按是否相等判定', () => {
+  assert.equal(driftOf(2, 2), 0);
+  assert.equal(driftOf(2, 3), 0.5);
+  assert.equal(driftOf(0, 0), 0);
+  assert.equal(driftOf(0, 5), 1);
+  assert.equal(driftOf(-4, -2), 0.5);
+});
+
+test('敏感性：过程量（剔除点数）变化不算「结论翻盘」', async () => {
+  const d = ds(iris);
+  const plan = {
+    version: 1,
+    steps: [
+      { id: 's1', op: 'drop_outliers', params: { column: 'petal_length_cm', k: 1.5, confirm: true } },
+      { id: 's2', op: 'correlate', params: { x: 'sepal_length_cm', y: 'petal_length_cm' } },
+    ],
+  };
+  const run = await executePlan(plan, d);
+  const res = await runSensitivity({ dataset: d, plan, baseline: run });
+  const removed = res.variants[0].cells.find((c) => c.field === 'removed');
+  assert.ok(removed, '剔除点数应当被记录进表格');
+  assert.equal(removed.judged, false, '剔除点数属于过程量，不参与稳健性判定');
+  const r = res.variants[0].cells.find((c) => c.field === 'r');
+  assert.equal(r.judged, true, '相关系数才是结论类数字');
+  assert.notEqual(res.verdict, 'fragile', '过程量变化不能把结论判成不稳');
 });
