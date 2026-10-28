@@ -1,4 +1,5 @@
 import { toDataset } from '../kernel/csv.js';
+import { columnProfiles, profileWarnings } from '../kernel/profile.js';
 import { executePlan, validatePlan } from '../kernel/index.js';
 import { compileByRules, compileByLLM, buildClaims, renderClaim, groupCandidates, withoutDropOutliers } from '../planner.js';
 import { sha256, shortHash } from '../kernel/hash.js';
@@ -48,6 +49,7 @@ async function loadCsv(text, label = 'CSV') {
       `<span class="chip">SHA-256 <b>${shortHash(hash, 16)}</b></span>`,
     ].join('');
     show('datasetInfo', true);
+    renderProfile(dataset);
     renderPreview(dataset);
     setStatus(`已载入 ${dataset.rowCount} 行 · 原始层只读`, true);
     show('step3', false); show('step4', false); show('step5', false);
@@ -88,6 +90,35 @@ function renderPreview(dataset) {
       </table>
     </div>`;
   show('dataPreview', true);
+}
+
+/** 数据体检：每列缺失率、唯一值、范围/最常见值，顺手标出明显问题 */
+function renderProfile(dataset) {
+  const profiles = columnProfiles(dataset);
+  const warnings = profileWarnings(profiles);
+  const fmt = (v) => (typeof v === 'number' ? fmtTick(v) : escapeHtml(String(v ?? '').slice(0, 14)));
+  const rows = profiles.map((p) => {
+    const bad = p.missingRate >= 0.2 || p.constant;
+    const range = p.kind === 'number' && p.min !== undefined
+      ? `${fmt(p.min)} ~ ${fmt(p.max)}（均值 ${fmt(p.mean)}）`
+      : p.top !== undefined ? `最常见「${fmt(p.top)}」×${p.topCount}` : '—';
+    return `<tr class="${bad ? 'bad' : ''}">
+      <td>${escapeHtml(p.name)}<span class="kind">${p.kind === 'number' ? '数值' : '文本'}</span></td>
+      <td class="num">${p.n}</td>
+      <td class="num ${p.missing ? 'warn' : ''}">${p.missing}${p.missing ? `（${(p.missingRate * 100).toFixed(1)}%）` : ''}</td>
+      <td class="num">${p.unique}</td>
+      <td>${range}</td>
+    </tr>`;
+  }).join('');
+  $('dataProfile').innerHTML = `
+    <div class="preview-head">数据体检<span class="hint">${dataset.columns.length} 列 · ${dataset.rowCount} 行${warnings.length ? ` · ⚠ ${escapeHtml(warnings.slice(0, 3).join('；'))}${warnings.length > 3 ? ' …' : ''}` : ' · 未发现明显问题'}</span></div>
+    <div class="preview-scroll">
+      <table>
+        <thead><tr><th>列</th><th>行数</th><th>缺失</th><th>不同取值</th><th>范围 / 最常见</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+  show('dataProfile', true);
 }
 const dropzone = $('dropzone');
 dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('drag'); });
@@ -768,6 +799,8 @@ $('resetBtn').addEventListener('click', () => {
   $('question').value = '';
   $('datasetInfo').innerHTML = '';
   $('dataPreview').innerHTML = '';
+  $('dataProfile').innerHTML = '';
+  show('dataProfile', false);
   show('dataPreview', false);
   $('planList').innerHTML = '';
   $('claims').innerHTML = '';

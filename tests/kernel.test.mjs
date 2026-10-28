@@ -318,3 +318,24 @@ test('审计：正文里的数字与声明值不一致要判不符', async () =>
   assert.equal(results[2].verdict, 'ok', '正文没有数字时不检查');
   assert.equal(results[2].textCheck.checked, false);
 });
+
+// ---------- 数据体检 ----------
+test('数据体检：缺失率、唯一值、常量列与范围', async () => {
+  const { columnProfiles, profileWarnings, columnProfile } = await import('../src/kernel/profile.js');
+  const d = ds('a,b,c\n1,x,5\n2,,5\n3,y,5\n4,,5\n');
+  const profiles = columnProfiles(d);
+  const a = profiles.find((p) => p.name === 'a');
+  const b = profiles.find((p) => p.name === 'b');
+  const c = profiles.find((p) => p.name === 'c');
+  assert.equal(a.missing, 0);
+  assert.equal(a.min, 1);
+  assert.equal(a.max, 4);
+  assert.equal(b.missing, 2);
+  assert.equal(b.missingRate, 0.5);
+  assert.equal(b.unique, 2);
+  assert.equal(c.constant, true);
+  const warnings = profileWarnings(profiles);
+  assert.ok(warnings.some((w) => w.includes('b') && w.includes('50.0%')));
+  assert.ok(warnings.some((w) => w.includes('c') && w.includes('常量')));
+  assert.equal(columnProfile(d, d.columns[0]).kind, 'number');
+});

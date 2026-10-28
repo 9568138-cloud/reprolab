@@ -154,6 +154,14 @@ textarea, .input {
   color: #8fa0cc; margin-top: 4px;
 }
 
+.profile { margin-top: 14px; border: 1px solid var(--line); border-radius: 12px; background: #0d1428; overflow: hidden; }
+.profile table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.profile th, .profile td { padding: 7px 12px; text-align: left; border-bottom: 1px solid #16203f; white-space: nowrap; }
+.profile thead th { color: #cfdcf7; font-weight: 600; background: #101a36; font-size: 12px; }
+.profile td.num { text-align: right; font-family: ui-monospace, Consolas, monospace; }
+.profile td.warn { color: #ffb3b3; }
+.profile td .kind { margin-left: 6px; font-size: 10.5px; color: var(--muted); }
+.profile tr.bad td { background: rgba(255, 107, 107, .06); }
 /* ---- 数据预览 ---- */
 .preview { margin-top: 14px; border: 1px solid var(--line); border-radius: 12px; background: #0d1428; overflow: hidden; }
 .preview-head { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 12px; font-size: 12.5px; border-bottom: 1px solid var(--line); }
