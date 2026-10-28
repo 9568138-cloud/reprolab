@@ -59,7 +59,8 @@
     <details class="dsl" id="auditJsonWrap">
       <summary>审计案 JSON（可直接粘贴或编辑；改一个数字就能看它报不一致）</summary>
       <textarea id="auditJson" rows="10" spellcheck="false" placeholder="在这里粘贴审计案 JSON，或点上面「用刚才的分析生成审计案」自动填。"></textarea>
-      <div class="row"><button class="btn ghost" id="auditUseJson">用这段 JSON 审计</button><span class="hint">格式：{title, plan, claims:[{text, stepId, field, value}], expectedArtifactHash?}</span></div>
+      <div class="row"><button class="btn ghost" id="auditUseJson">用这段 JSON 审计</button>
+        <button class="btn ghost" id="auditTemplate">下载审计案模板</button><span class="hint">格式：{title, plan, claims:[{text, stepId, field, value}], expectedArtifactHash?}</span></div>
     </details>
     <div id="auditCase" class="audit-case hidden"></div>
     <div id="auditResult" class="audit-result hidden"></div>

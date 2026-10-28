@@ -61,12 +61,24 @@ export async function auditReport({ dataset, plan, claims, expectedArtifactHash,
       return { ...base, verdict: 'unreproducible', reason: `步骤 ${claim.stepId} 没有字段 ${claim.field}`, actual, diff: null };
     }
     const cmp = compareValue(claim.value, actual, tol);
+    const textCheck = typeof claim.value === 'number' ? textMatchesValue(base.text, claim.value, tol) : { checked: false, ok: true };
+    if (cmp.ok && textCheck.checked && !textCheck.ok) {
+      return {
+        ...base,
+        actual,
+        diff: cmp.diff,
+        verdict: 'mismatch',
+        reason: `正文里的数字与声明值不一致（正文出现 ${textCheck.numbers.join('、')}，声明 ${fmt(claim.value)}）`,
+        textCheck,
+      };
+    }
     return {
       ...base,
       actual,
       diff: cmp.diff,
       verdict: cmp.ok ? 'ok' : 'mismatch',
       reason: cmp.ok ? '重算值与报告一致' : `重算值 ${fmt(actual)} ≠ 报告值 ${fmt(claim.value)}`,
+      textCheck,
     };
   });
 
@@ -87,6 +99,37 @@ export async function auditReport({ dataset, plan, claims, expectedArtifactHash,
 function fmt(v) {
   if (typeof v !== 'number') return String(v);
   return String(Number(v.toFixed(6)));
+}
+
+/** 把结论文本里的数字抓出来（含小数位数），用于「正文 vs 声明值」交叉检查 */
+export function numbersInText(text) {
+  const out = [];
+  const re = /-?\d+(?:\.\d+)?/g;
+  let m;
+  while ((m = re.exec(String(text || ''))) !== null) {
+    const raw = m[0];
+    const decimals = raw.includes('.') ? raw.split('.')[1].length : 0;
+    out.push({ value: Number(raw), decimals });
+  }
+  return out;
+}
+
+/**
+ * 正文里的数字能不能对上声明值：
+ *   正文没写数字 → 不检查（checked=false）
+ *   有一个数字与声明值在容差内（或按正文精度四舍五入相等）→ 通过
+ *   否则 → 判为正文与数值自相矛盾
+ */
+export function textMatchesValue(text, value, tol = DEFAULT_TOL) {
+  const nums = numbersInText(text);
+  if (!nums.length) return { checked: false, ok: true, numbers: [] };
+  for (const n of nums) {
+    if (Math.abs(n.value - value) <= Math.max(1e-9, Math.abs(value) * tol)) return { checked: true, ok: true, numbers: nums.map((x) => x.value) };
+    if (n.decimals > 0 && Number(Number(value).toFixed(Math.min(6, n.decimals))) === n.value) {
+      return { checked: true, ok: true, numbers: nums.map((x) => x.value) };
+    }
+  }
+  return { checked: true, ok: false, numbers: nums.map((x) => x.value) };
 }
 
 /** 审计结果 → Markdown 报告（可贴进文档，或用浏览器打印成 PDF） */

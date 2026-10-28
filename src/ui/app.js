@@ -400,6 +400,7 @@ async function runPlan() {
     renderDropped(run);
     renderTimeline(run);
     renderChart(run);
+    addChartActions();
     $('hashBox').textContent = `产物总哈希：${run.artifactHash}`;
     show('step4', true); show('step5', true);
     syncAuditButtons();
@@ -471,6 +472,7 @@ async function undoDrop() {
     renderDropped(run);
     renderTimeline(run);
     renderChart(run);
+    addChartActions();
     $('hashBox').textContent = `已撤回删除并按完整数据重算\n产物总哈希：${run.artifactHash}`;
     $('recheckHint').textContent = '';
     setStatus('已撤回删除 · 已按原始数据重算', true);
@@ -875,6 +877,37 @@ $('auditFromRun').addEventListener('click', () => {
   loadAuditCase(c, '当前分析结果');
 });
 
+$('auditTemplate').addEventListener('click', () => {
+  if (!state.dataset) return toast('先载入数据，再生成模板', 'warn');
+  downloadText('审计案模板.json', JSON.stringify(auditTemplate(), null, 2), 'application/json');
+  toast('模板已下载：照着 claims 填你报告里的结论', 'ok');
+});
+
+/** 生成一份空白的审计案模板（列名取当前数据的前两列数值 + 第一列文本） */
+function auditTemplate() {
+  const nums = state.dataset.columns.filter((c) => c.kind === 'number');
+  const strs = state.dataset.columns.filter((c) => c.kind === 'string');
+  const y = (nums[1] || nums[0] || {}).name;
+  const x = (nums[0] || {}).name;
+  const g = (strs[0] || {}).name;
+  const steps = [];
+  if (y) steps.push({ id: 's1', op: 'describe', params: { column: y } });
+  if (x && y && x !== y) steps.push({ id: `s${steps.length + 1}`, op: 'correlate', params: { x, y } });
+  if (g && y) steps.push({ id: `s${steps.length + 1}`, op: 'group_summary', params: { groupBy: g, column: y } });
+  const corr = steps.find((s) => s.op === 'correlate');
+  return {
+    title: '（改成你的报告名字）',
+    note: 'claims 里每条对应报告里的一句话：stepId + field 指向上面的步骤字段，value 填报告写的数字，正文里也要写同一个数字。',
+    plan: { version: 1, question: '（这份报告要回答的问题）', steps },
+    claims: [
+      corr
+        ? { text: '示例：两列呈强负相关（r = -0.96）', stepId: corr.id, field: 'r', value: -0.96 }
+        : { text: '示例：均值 12.3', stepId: steps[0]?.id || 's1', field: 'n', value: 0 },
+    ],
+    expectedArtifactHash: '',
+  };
+}
+
 $('auditUseJson').addEventListener('click', () => {
   try {
     const c = JSON.parse($('auditJson').value);
@@ -1025,6 +1058,52 @@ footer{margin-top:28px;color:#8a93a5;font-size:12px}
 <footer>由溯真 ReproLab 生成：每条判定都用「原始数据 + 分析计划」重新执行得到，可用 reprolab 命令行复现。</footer>
 </body></html>`;
 }
+
+/** 图表导出：SVG 直接序列化，PNG 用 canvas 光栅化（2 倍图） */
+function addChartActions() {
+  const el = $('chart');
+  const svg = el.querySelector('svg');
+  if (!svg || el.querySelector('.chart-actions')) return;
+  el.insertAdjacentHTML('beforeend', '<div class="chart-actions"><button class="btn ghost small" data-act="svg">下载 SVG</button><button class="btn ghost small" data-act="png">下载 PNG</button></div>');
+}
+
+$('chart').addEventListener('click', async (e) => {
+  const act = e.target.closest('[data-act]')?.dataset.act;
+  if (!act) return;
+  const svg = $('chart').querySelector('svg');
+  if (!svg) return;
+  const xml = new XMLSerializer().serializeToString(svg);
+  if (act === 'svg') {
+    downloadText(`图表-${Date.now()}.svg`, `<?xml version="1.0" encoding="UTF-8"?>
+${xml}`, 'image/svg+xml');
+    toast('SVG 已下载', 'ok');
+    return;
+  }
+  try {
+    const img = new Image();
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml);
+    await img.decode();
+    const scale = 2;
+    const canvas = document.createElement('canvas');
+    canvas.width = svg.viewBox.baseVal.width * scale || 520 * scale;
+    canvas.height = svg.viewBox.baseVal.height * scale || 340 * scale;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#0d1428';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob((blob) => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `图表-${Date.now()}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast('PNG 已下载（2 倍图）', 'ok');
+    }, 'image/png');
+  } catch (err) {
+    toast(`导出 PNG 失败：${err.message}`, 'error');
+  }
+});
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

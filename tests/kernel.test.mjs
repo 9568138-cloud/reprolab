@@ -298,3 +298,23 @@ test('撤回删除：没有删除步骤时返回 null', () => {
   const plan = { version: 1, steps: [{ id: 's1', op: 'describe', params: { column: 'petal_width_cm' } }] };
   assert.equal(withoutDropOutliers(plan), null);
 });
+
+// ---------- 审计：正文数字 vs 声明值 ----------
+test('审计：正文里的数字与声明值不一致要判不符', async () => {
+  const d = ds(iris);
+  const plan = { version: 1, steps: [{ id: 's1', op: 'correlate', params: { x: 'petal_length_cm', y: 'petal_width_cm' } }] };
+  const { results } = await auditReport({
+    dataset: d,
+    plan,
+    claims: [
+      { text: '花瓣长宽相关（r = 0.9629）', stepId: 's1', field: 'r', value: 0.962865 },
+      { text: '花瓣长宽相关（r = 0.5）', stepId: 's1', field: 'r', value: 0.962865 },
+      { text: '正文没写数字', stepId: 's1', field: 'r', value: 0.962865 },
+    ],
+  });
+  assert.equal(results[0].verdict, 'ok', '四舍五入后一致应通过');
+  assert.equal(results[1].verdict, 'mismatch', '正文写 0.5 但声明值是真实值，应判不符');
+  assert.match(results[1].reason, /正文/);
+  assert.equal(results[2].verdict, 'ok', '正文没有数字时不检查');
+  assert.equal(results[2].textCheck.checked, false);
+});
