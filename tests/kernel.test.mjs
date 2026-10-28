@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { toDataset } from '../src/kernel/csv.js';
 import { executePlan, validatePlan, PlanError, canonicalArtifact } from '../src/kernel/index.js';
-import { compileByRules, buildClaims, renderClaim } from '../src/planner.js';
+import { compileByRules, buildClaims, renderClaim, withoutDropOutliers } from '../src/planner.js';
 import { sha256, stableStringify } from '../src/kernel/hash.js';
 import { buildReproducePackage } from '../src/export/package.js';
 import { auditReport, auditToMarkdown, compareValue } from '../src/audit.js';
@@ -270,4 +270,24 @@ test('回归：复现包里的 verify.mjs 白名单要跟算子表同步（曾�
   for (const op of Object.keys(OPERATORS)) {
     assert.ok(verify.includes(`"${op}"`), `verify.mjs 白名单缺少算子 ${op}`);
   }
+});
+
+// ---------- 撤回删除 ----------
+test('撤回删除：计划里去掉 drop_outliers 并重排 step id', async () => {
+  const d = ds(iris);
+  const plan = compileByRules(d, 'petal_length_cm 和 petal_width_cm 的关系，有异常点就剔除，出图');
+  assert.ok(plan.steps.some((s) => s.op === 'drop_outliers'));
+  const next = withoutDropOutliers(plan);
+  assert.ok(next);
+  assert.ok(!next.steps.some((s) => s.op === 'drop_outliers'));
+  assert.deepEqual(next.steps.map((s) => s.id), next.steps.map((_, i) => `s${i + 1}`));
+  const run = await executePlan(next, d);
+  assert.equal(run.droppedRows.length, 0, '撤回后不应再有删除行');
+  const original = await executePlan(plan, d);
+  assert.notEqual(run.artifactHash, original.artifactHash, '撤回后产物哈希应当变化');
+});
+
+test('撤回删除：没有删除步骤时返回 null', () => {
+  const plan = { version: 1, steps: [{ id: 's1', op: 'describe', params: { column: 'petal_width_cm' } }] };
+  assert.equal(withoutDropOutliers(plan), null);
 });

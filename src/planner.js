@@ -85,6 +85,13 @@ export function compileByRules(dataset, question) {
   return plan;
 }
 
+/** 撤回「剔除异常点」：从计划里移除删除步骤并重排 step id；没有可撤回的步骤时返回 null */
+export function withoutDropOutliers(plan) {
+  const steps = plan.steps.filter((s) => s.op !== 'drop_outliers');
+  if (steps.length === plan.steps.length) return null;
+  return { ...plan, steps: steps.map((s, i) => ({ ...s, id: `s${i + 1}` })) };
+}
+
 /** 由执行结果生成结论卡；每个数字都绑定 stepId + 字段，前端据此校验 */
 export function buildClaims(plan, steps) {
   const claims = [];
@@ -124,7 +131,7 @@ export function buildClaims(plan, steps) {
     const o = out.output;
     claims.push({
       id: 'c3',
-      text: `按 IQR（k = ${o.k}）检出 {{count}} 个异常点，已剔除 ${o.removed} 行（可撤回）`,
+      text: `按 IQR（k = ${o.k}）检出 {{count}} 个异常点，已剔除 ${o.removed} 行${o.removed > 0 ? '（可撤回）' : ''}`,
       refs: [{ stepId: out.id, field: 'removed', value: o.removed }, { stepId: out.id, field: 'count', value: o.outliers.length }],
       verdict: o.removed > 0 ? '需人工确认' : '无需处理',
     });

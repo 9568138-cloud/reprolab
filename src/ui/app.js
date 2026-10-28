@@ -1,6 +1,6 @@
 import { toDataset } from '../kernel/csv.js';
 import { executePlan, validatePlan } from '../kernel/index.js';
-import { compileByRules, compileByLLM, buildClaims, renderClaim, groupCandidates } from '../planner.js';
+import { compileByRules, compileByLLM, buildClaims, renderClaim, groupCandidates, withoutDropOutliers } from '../planner.js';
 import { sha256, shortHash } from '../kernel/hash.js';
 import { buildReproducePackage } from '../export/package.js';
 import { auditReport, auditToMarkdown } from '../audit.js';
@@ -47,6 +47,7 @@ async function loadCsv(text, label = 'CSV') {
       `<span class="chip">SHA-256 <b>${shortHash(hash, 16)}</b></span>`,
     ].join('');
     show('datasetInfo', true);
+    renderPreview(dataset);
     setStatus(`已载入 ${dataset.rowCount} 行 · 原始层只读`, true);
     show('step3', false); show('step4', false); show('step5', false);
     fillColumnSelects();
@@ -65,6 +66,28 @@ $('fileInput').addEventListener('change', async (e) => {
   const file = e.target.files?.[0];
   if (file) loadCsv(await file.text(), file.name);
 });
+
+/** 前 8 行预览：用户上传后第一件事是确认“传对了吗” */
+function renderPreview(dataset) {
+  const cols = dataset.columns.slice(0, 8);
+  const rows = dataset.rows.slice(0, 8);
+  const head = cols.map((c) => `<th>${escapeHtml(c.name)}<span class="kind">${c.kind === 'number' ? '数值' : '文本'}</span></th>`).join('');
+  const body = rows.map((r) => `<tr>${cols.map((c) => {
+    const v = r[c.index];
+    const missing = v === undefined || v === '';
+    const shown = missing ? '<span class="miss">缺失</span>' : escapeHtml(String(v).slice(0, 20));
+    return `<td class="${c.kind === 'number' ? 'num' : ''}">${shown}</td>`;
+  }).join('')}</tr>`).join('');
+  $('dataPreview').innerHTML = `
+    <div class="preview-head">前 ${rows.length} 行预览<span class="hint">共 ${dataset.rowCount} 行 · ${dataset.columns.length} 列</span></div>
+    <div class="preview-scroll">
+      <table>
+        <thead><tr>${head}</tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>`;
+  show('dataPreview', true);
+}
 const dropzone = $('dropzone');
 dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('drag'); });
 dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
@@ -348,11 +371,46 @@ function renderClaims(claims, run) {
 
 function renderDropped(run) {
   const rows = run.droppedRows || [];
-  if (!rows.length) { show('droppedBox', false); return; }
+  if (!rows.length) { $('droppedBox').innerHTML = ''; show('droppedBox', false); return; }
+  const shown = rows.slice(0, 24);
+  const rest = rows.length - shown.length;
   $('droppedBox').innerHTML = `<span class="dropped-title">本次删除了 ${rows.length} 行原始数据</span>` +
-    rows.map((r) => `<span class="chip chip-danger">CSV 第 ${r} 行</span>`).join('') +
-    '<span class="hint">删的是哪几行，上面写清楚了；复现包里的 run.json 也留着这份清单。</span>';
+    shown.map((r) => `<span class="chip chip-danger">CSV 第 ${r} 行</span>`).join('') +
+    (rest > 0 ? `<span class="chip">…等共 ${rows.length} 行（完整清单在复现包 run.json 里）</span>` : '') +
+    '<button class="btn ghost small" id="undoDrop">撤回这次删除</button>' +
+    '<span class="hint">撤回后按完整数据重算，产物哈希会变（已导出的复现包不受影响）。</span>';
   show('droppedBox', true);
+}
+
+$('droppedBox').addEventListener('click', async (e) => {
+  if (e.target.closest('#undoDrop')) await undoDrop();
+});
+
+/** 撤回「剔除异常点」：从计划里去掉删除步骤，按完整数据重算 */
+async function undoDrop() {
+  if (!state.plan || !state.run) return;
+  const next = withoutDropOutliers(state.plan);
+  if (!next) return toast('本次计划里没有可撤回的删除步骤', 'warn');
+  const btn = $('undoDrop');
+  if (btn) btn.disabled = true;
+  try {
+    state.plan = next;
+    renderPlan(next); // 计划卡、确认门、DSL 同步
+    const run = await executePlan(next, state.dataset);
+    const claims = buildClaims(next, run.steps);
+    state.run = run;
+    state.claims = claims;
+    renderClaims(claims, run);
+    renderDropped(run);
+    renderTimeline(run);
+    renderChart(run);
+    $('hashBox').textContent = `已撤回删除并按完整数据重算\n产物总哈希：${run.artifactHash}`;
+    $('recheckHint').textContent = '';
+    setStatus('已撤回删除 · 已按原始数据重算', true);
+    toast('已撤回「剔除异常点」，结果按完整数据重新算过', 'ok');
+  } catch (err) {
+    toast(`撤回失败：${err.message}`, 'error');
+  }
 }
 
 function renderTimeline(run) {
@@ -540,6 +598,8 @@ $('resetBtn').addEventListener('click', () => {
   $('pasteInput').value = '';
   $('question').value = '';
   $('datasetInfo').innerHTML = '';
+  $('dataPreview').innerHTML = '';
+  show('dataPreview', false);
   $('planList').innerHTML = '';
   $('claims').innerHTML = '';
   $('timeline').innerHTML = '';
@@ -549,6 +609,7 @@ $('resetBtn').addEventListener('click', () => {
   $('compileHint').textContent = '';
   show('datasetInfo', false); show('step3', false); show('step4', false); show('step5', false);
   selectedOps.clear();
+  state.run = null;
   renderIntentChips();
   setStatus('未载入数据');
   toast('已重置', 'ok');
