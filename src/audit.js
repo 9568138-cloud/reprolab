@@ -149,3 +149,55 @@ export function auditToMarkdown({ title = '报告审计结果', summary, results
   });
   return lines.join('\n') + '\n';
 }
+
+// ---------------- 批量审计：一个实验室交来 N 份报告，一次审完 ----------------
+
+/**
+ * 把多份报告的审计结果汇总成一张表（纯函数，界面与 CLI 共用）
+ * @param {Array<{title?:string, summary:object}>} entries 每份报告的标题与 auditReport().summary
+ * @param {{dataName?:string}} [meta]
+ */
+export function summarizeAudits(entries, { dataName = '' } = {}) {
+  const reports = (entries || []).map((e, i) => {
+    const s = e.summary || {};
+    return {
+      title: e.title || `报告 ${i + 1}`,
+      total: Number(s.total) || 0,
+      ok: Number(s.ok) || 0,
+      mismatch: Number(s.mismatch) || 0,
+      unreproducible: Number(s.unreproducible) || 0,
+      passed: !!s.passed,
+      artifactHash: s.artifactHash || '',
+      hashMatches: s.hashMatches === undefined ? null : s.hashMatches,
+    };
+  });
+  const sum = (k) => reports.reduce((a, r) => a + r[k], 0);
+  const agg = {
+    reports: reports.length,
+    claims: sum('total'),
+    ok: sum('ok'),
+    mismatch: sum('mismatch'),
+    unreproducible: sum('unreproducible'),
+    failedReports: reports.filter((r) => !r.passed).length,
+    dataName,
+  };
+  // 空集合不算通过：没有报告就没有可下的结论
+  return { ...agg, passed: reports.length > 0 && agg.failedReports === 0, entries: reports };
+}
+
+/** 批量审计汇总 → Markdown（贴进整改通知或直接打印） */
+export function auditBatchToMarkdown({ summary, title = '批量审计汇总' }) {
+  const lines = [
+    `# ${title}`,
+    '',
+    `- 报告数：${summary.reports}`,
+    `- 结论数：${summary.claims}（通过 ${summary.ok} / 不符 ${summary.mismatch} / 无法复现 ${summary.unreproducible}）`,
+    `- 整体判定：${summary.passed ? '✅ 全部报告可复现' : `❌ ${summary.failedReports} 份报告存在问题`}`,
+  ];
+  if (summary.dataName) lines.push(`- 数据集：${summary.dataName}`);
+  lines.push('', '| 报告 | 结论 | 通过 | 不符 | 无法复现 | 判定 |', '| :-- | --: | --: | --: | --: | :-- |');
+  for (const r of summary.entries) {
+    lines.push(`| ${String(r.title).replace(/\|/g, '\\|')} | ${r.total} | ${r.ok} | ${r.mismatch} | ${r.unreproducible} | ${r.passed ? '通过' : '不通过'} |`);
+  }
+  return lines.join('\n') + '\n';
+}

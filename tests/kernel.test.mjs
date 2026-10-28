@@ -6,7 +6,7 @@ import { executePlan, validatePlan, PlanError, canonicalArtifact } from '../src/
 import { compileByRules, buildClaims, renderClaim, withoutDropOutliers } from '../src/planner.js';
 import { sha256, stableStringify } from '../src/kernel/hash.js';
 import { buildReproducePackage } from '../src/export/package.js';
-import { auditReport, auditToMarkdown, compareValue } from '../src/audit.js';
+import { auditReport, auditBatchToMarkdown, auditToMarkdown, compareValue, summarizeAudits } from '../src/audit.js';
 
 const read = (f) => readFileSync(new URL(`../sample-data/${f}`, import.meta.url), 'utf8');
 const iris = read('iris.csv');
@@ -454,4 +454,71 @@ test('按数值解析：去掉千分位与单位，万/亿 换算，解析不了
   assert.deepEqual(r.dataset.rows.map((row) => row[1]), ['125000', '138000', '', '', '98000']);
   const again = forceNumericColumn(r.dataset, 'price');
   assert.equal(again.already, true, '已经是数值列时不再重复转换');
+});
+
+// ---------- 批量审计：一个实验室交来 N 份报告 ----------
+test('批量审计：汇总累加各份判定，有一份不通过整体就不通过', async () => {
+  const d = ds(iris);
+  const planA = { version: 1, steps: [{ id: 's1', op: 'group_summary', params: { groupBy: 'species', column: 'sepal_width_cm' } }] };
+  const a = await auditReport({
+    dataset: d,
+    plan: planA,
+    claims: [{ text: '三个分组', stepId: 's1', field: 'groupCount', value: 3 }],
+  });
+
+  const planB = { version: 1, steps: [{ id: 's1', op: 'describe', params: { column: 'petal_width_cm' } }] };
+  const b = await auditReport({
+    dataset: d,
+    plan: planB,
+    claims: [
+      { text: '用了 150 行', stepId: 's1', field: 'rowsUsed', value: 150 },
+      { text: '写成 120 行', stepId: 's1', field: 'rowsUsed', value: 120 },
+      { text: '引用了不存在的步骤', stepId: 's9', field: 'rowsUsed', value: 1 },
+    ],
+  });
+
+  const batch = summarizeAudits(
+    [{ title: '报告 A', summary: a.summary }, { title: '报告 B', summary: b.summary }],
+    { dataName: 'iris.csv' },
+  );
+  assert.equal(batch.reports, 2);
+  assert.equal(batch.claims, 4);
+  assert.equal(batch.ok, 2);
+  assert.equal(batch.mismatch, 1);
+  assert.equal(batch.unreproducible, 1);
+  assert.equal(batch.failedReports, 1);
+  assert.equal(batch.passed, false);
+  assert.equal(batch.dataName, 'iris.csv');
+  assert.equal(batch.entries[0].passed, true);
+  assert.equal(batch.entries[1].passed, false);
+});
+
+test('批量审计：全部通过时整体通过；空集合不算通过', async () => {
+  const d = ds(iris);
+  const plan = { version: 1, steps: [{ id: 's1', op: 'describe', params: { column: 'petal_length_cm' } }] };
+  const one = await auditReport({ dataset: d, plan, claims: [{ text: '用了 150 行', stepId: 's1', field: 'rowsUsed', value: 150 }] });
+  const all = summarizeAudits([{ title: 'A', summary: one.summary }, { title: 'B', summary: one.summary }]);
+  assert.equal(all.passed, true);
+  assert.equal(all.failedReports, 0);
+  assert.equal(all.entries[0].artifactHash, one.summary.artifactHash);
+
+  const empty = summarizeAudits([]);
+  assert.equal(empty.reports, 0);
+  assert.equal(empty.passed, false, '没有报告时不能给出「通过」这种结论');
+  assert.deepEqual(empty.entries, []);
+});
+
+test('批量审计：Markdown 汇总里每份一行，结论不通过的那份标出来', async () => {
+  const entries = [
+    { title: '实验室 A 的报告', summary: { total: 2, ok: 2, mismatch: 0, unreproducible: 0, passed: true } },
+    { title: '实验室 B 的报告', summary: { total: 3, ok: 1, mismatch: 1, unreproducible: 1, passed: false } },
+  ];
+  const summary = summarizeAudits(entries, { dataName: '中国70城房价指数_环比.csv' });
+  const md = auditBatchToMarkdown({ summary });
+  assert.match(md, /报告数：2/);
+  assert.match(md, /结论数：5（通过 3 \/ 不符 1 \/ 无法复现 1）/);
+  assert.match(md, /❌ 1 份报告存在问题/);
+  assert.match(md, /\| 实验室 A 的报告 \| 2 \| 2 \| 0 \| 0 \| 通过 \|/);
+  assert.match(md, /\| 实验室 B 的报告 \| 3 \| 1 \| 1 \| 1 \| 不通过 \|/);
+  assert.match(md, /中国70城房价指数_环比\.csv/);
 });

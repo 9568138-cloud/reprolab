@@ -48,10 +48,11 @@
       上传一份<strong>别人的报告</strong>（或者你上个月自己写的），我用同一份数据把每条结论重算一遍：
       <em>算得对的放行，对不上的标出来，算不出的说明为什么无法复现。</em>
       需要两样东西：<b>上面载入的原始数据</b> + <b>一份审计案 JSON</b>（格式见 README）。
+      <b>一次导入多份</b>就是批量审计：一张表看完谁的报告经得起重算。
     </p>
     <div class="row">
-      <input type="file" id="auditFile" accept=".json,application/json" hidden />
-      <button class="btn" id="auditPick">导入审计案 JSON</button>
+      <input type="file" id="auditFile" accept=".json,application/json" multiple hidden />
+      <button class="btn" id="auditPick">导入审计案 JSON（可多选）</button>
       <button class="btn ghost" id="auditFromRun" disabled title="拿刚才分析出来的结论生成一份审计案">用刚才的分析生成审计案</button>
       <button class="btn primary" id="auditRun" disabled>开始审计</button>
       <span class="hint" id="auditHint"></span>
@@ -63,6 +64,7 @@
         <button class="btn ghost" id="auditTemplate">下载审计案模板</button><span class="hint">格式：{title, plan, claims:[{text, stepId, field, value}], expectedArtifactHash?}</span></div>
     </details>
     <div id="auditCase" class="audit-case hidden"></div>
+    <div id="auditBatch" class="audit-result hidden"></div>
     <div id="auditResult" class="audit-result hidden"></div>
   </section>
 

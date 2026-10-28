@@ -5,7 +5,7 @@ import { compileByRules, compileByLLM, buildClaims, renderClaim, groupCandidates
 import { sha256, shortHash } from '../kernel/hash.js';
 import { buildReproducePackage } from '../export/package.js';
 import { verifyPackage } from '../export/verify-runner.js';
-import { auditReport, auditToMarkdown, resolveStepField } from '../audit.js';
+import { auditReport, auditBatchToMarkdown, auditToMarkdown, resolveStepField, summarizeAudits } from '../audit.js';
 import { zipStore } from '../export/zip.js';
 
 const $ = (id) => document.getElementById(id);
@@ -1040,11 +1040,124 @@ $('auditPick').addEventListener('click', () => {
   $('auditFile').click();
 });
 $('auditFile').addEventListener('change', async (e) => {
-  const file = e.target.files?.[0];
-  if (!file) return;
-  try { loadAuditCase(JSON.parse(await file.text()), file.name); }
-  catch { toast('不是合法的 JSON 文件', 'error'); }
+  const files = [...(e.target.files || [])];
+  e.target.value = '';
+  if (!files.length) return;
+  if (files.length === 1) {
+    try { loadAuditCase(JSON.parse(await files[0].text()), files[0].name); }
+    catch { toast('不是合法的 JSON 文件', 'error'); }
+    return;
+  }
+  const cases = [];
+  for (const f of files) {
+    try { cases.push({ ...JSON.parse(await f.text()), __file: f.name }); }
+    catch { toast(`${f.name} 不是合法 JSON，已跳过`, 'warn'); }
+  }
+  await runBatchAudit(cases);
 });
+
+/** 批量审计：一个实验室交来 N 份报告，一次全部重算并汇总 */
+let auditBatchDetail = [];
+
+async function runBatchAudit(cases) {
+  if (!state.dataset) return toast('先在「数据接入」载入这些报告对应的 CSV', 'warn');
+  if (!cases.length) return;
+  $('auditHint').textContent = `批量重算 ${cases.length} 份…`;
+  $('auditRun').disabled = true;
+  show('auditCase', false);
+  show('auditResult', false);
+  try {
+    const entries = [];
+    const details = [];
+    for (const c of cases) {
+      const title = c.title || c.__file || '未命名报告';
+      if (!c.plan || !Array.isArray(c.claims)) {
+        entries.push({ title, summary: { total: 1, ok: 0, mismatch: 0, unreproducible: 1, passed: false } });
+        details.push({ title, error: '缺少 plan 或 claims，无法审计' });
+        continue;
+      }
+      const { results, summary } = await auditReport({
+        dataset: state.dataset,
+        plan: c.plan,
+        claims: c.claims,
+        expectedArtifactHash: c.expectedArtifactHash,
+      });
+      entries.push({ title, summary });
+      details.push({ title, auditCase: c, results, summary });
+    }
+    auditBatchDetail = details;
+    const summary = summarizeAudits(entries, { dataName: state.dataset.source || '' });
+    renderBatchAudit(summary);
+    $('auditHint').textContent = summary.passed
+      ? `${summary.reports} 份全部通过`
+      : `${summary.failedReports} / ${summary.reports} 份存在问题`;
+    setStatus(`批量审计完成 · ${summary.reports} 份 · ${summary.claims} 条`, true);
+    toast(
+      summary.passed ? `${summary.reports} 份报告全部可复现` : `${summary.failedReports} 份报告有问题：不符 ${summary.mismatch} 处、无法复现 ${summary.unreproducible} 条`,
+      summary.passed ? 'ok' : 'warn',
+    );
+  } catch (err) {
+    toast(`批量审计失败：${err.message}`, 'error');
+    $('auditHint').textContent = '';
+  } finally {
+    $('auditRun').disabled = false;
+  }
+}
+
+function renderBatchAudit(summary) {
+  const rows = summary.entries.map((r, i) => {
+    const kind = r.passed ? 'ok' : r.mismatch ? 'bad' : 'warn';
+    return `<tr class="audit-row ${kind}">
+      <td class="idx">${i + 1}</td>
+      <td>${escapeHtml(r.title)}</td>
+      <td class="num">${r.total}</td>
+      <td class="num">${r.ok}</td>
+      <td class="num">${r.mismatch}</td>
+      <td class="num">${r.unreproducible}</td>
+      <td><span class="vchip ${r.passed ? 'ok' : 'bad'}">${r.passed ? '通过' : '不通过'}</span></td>
+      <td><button class="btn ghost" data-batch="${i}">看明细</button></td>
+    </tr>`;
+  }).join('');
+
+  $('auditBatch').innerHTML = `
+    <div class="audit-summary ${summary.passed ? 'ok' : 'bad'}">
+      <span class="verdict-big">${summary.passed
+        ? `✅ ${summary.reports} 份报告全部可复现`
+        : `❌ ${summary.failedReports} / ${summary.reports} 份报告存在对不上的结论`}</span>
+      <span class="hint">共 ${summary.claims} 条结论 · 通过 ${summary.ok} · 不符 ${summary.mismatch} · 无法复现 ${summary.unreproducible}</span>
+    </div>
+    <table class="audit-table">
+      <thead><tr><th>#</th><th>报告</th><th>结论</th><th>通过</th><th>不符</th><th>无法复现</th><th>判定</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="row">
+      <button class="btn ghost" id="batchCopy">复制汇总（Markdown）</button>
+      <button class="btn ghost" id="batchDownload">下载汇总（.md）</button>
+      <span class="hint">这些报告用的是同一份数据；点「看明细」看单份的逐条判定。</span>
+    </div>`;
+  show('auditBatch', true);
+
+  $('auditBatch').querySelectorAll('[data-batch]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const item = auditBatchDetail[Number(btn.dataset.batch)];
+      if (!item || !item.auditCase) return toast(item?.error || '这份报告的明细不可用', 'warn');
+      loadAuditCase(item.auditCase, '批量里的这一份');
+      $('auditJson').value = JSON.stringify(item.auditCase, null, 2);
+      runAudit();
+      $('auditResult').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+
+  const md = () => auditBatchToMarkdown({ summary });
+  $('batchCopy').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(md()); toast('汇总已复制', 'ok'); }
+    catch { toast('复制失败，可用「下载汇总」', 'warn'); }
+  });
+  $('batchDownload').addEventListener('click', () => {
+    downloadText('批量审计汇总.md', md(), 'text/markdown;charset=utf-8');
+    toast('汇总已下载', 'ok');
+  });
+}
 
 $('auditFromRun').addEventListener('click', () => {
   const c = auditCaseFromRun();
