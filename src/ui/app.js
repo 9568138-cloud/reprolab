@@ -1009,7 +1009,19 @@ async function runSens() {
   try {
     const res = await runSensitivity({ dataset: state.dataset, plan: state.plan, baseline: state.run });
     if (!res.variants.length) {
-      box.innerHTML = `<div class="self-check-head"><b>没有可调参数</b><span class="hint">${escapeHtml(verdictText('none'))}</span></div>`;
+      // 计划里没有可调参数：给一条出路，而不是只弹个「没有」
+      const numeric = (state.dataset?.columns || []).filter((c) => c.kind === 'number');
+      const hasOutlier = state.plan.steps.some((s) => s.op === 'drop_outliers');
+      box.innerHTML = `<div class="self-check-head"><b>这个计划没有可调参数</b>
+        <span class="hint">敏感性只能扰动「剔除倍数 k」「筛选阈值」「分箱数」这三类数值；现在这版计划是纯描述 / 相关 / 分组，没有数值可动。</span></div>
+        <div class="row">
+          ${numeric.length && !hasOutlier ? '<button class="btn primary" id="sensAddOutlier">加一步「剔除异常点」再试</button>' : ''}
+          ${hasOutlier ? '<span class="hint">计划里已经有「剔除异常点」了，换个带数值参数的算子再试（比如条件筛选）</span>' : ''}
+          <span class="hint">${numeric.length && !hasOutlier ? `会插入一步 IQR 剔除（列 ${escapeHtml(numeric[0].name)}，k=1.5），重新执行后再跑敏感性` : '也可以回上面勾一个「条件筛选」重新生成计划'}</span>
+        </div>`;
+      show('sensBox', true);
+      const btn = $('sensAddOutlier');
+      if (btn) btn.addEventListener('click', () => addOutlierAndRetry());
       toast('这个计划里没有可调的数值参数', 'warn');
       return;
     }
@@ -1057,6 +1069,37 @@ async function runSens() {
     box.innerHTML = `<div class="hint bad">敏感性检验失败：${escapeHtml(err.message)}</div>`;
     toast(`敏感性检验失败：${err.message}`, 'error');
   }
+}
+
+/** 挑一列适合剔除异常点的：优先计划里已经在用的数值列 */
+function pickNumericForOutliers() {
+  const numeric = new Set((state.dataset?.columns || []).filter((c) => c.kind === 'number').map((c) => c.name));
+  for (const s of state.plan.steps) {
+    for (const key of ['y', 'column']) {
+      const v = s.params?.[key];
+      if (v && numeric.has(v)) return v;
+    }
+  }
+  return [...numeric][0];
+}
+
+/** 计划里没有可调参数时：插一步「剔除异常点」，重跑，再跑敏感性 */
+async function addOutlierAndRetry() {
+  if (!state.plan || !state.dataset) return;
+  const column = pickNumericForOutliers();
+  if (!column) return toast('这份数据没有数值列，做不了剔除异常点', 'warn');
+  const steps = [{ op: 'drop_outliers', params: { column, k: 1.5, confirm: true } }, ...state.plan.steps]
+    .map((s, i) => ({ ...s, id: `s${i + 1}` }));
+  state.plan = { ...state.plan, steps, engine: state.plan.engine || 'options' };
+  state.run = null;
+  state.claims = [];
+  renderPlan(state.plan);
+  show('step3', true);
+  // 用户点了这个按钮＝明确同意插入删数据的步骤，把闸门勾上再跑
+  $('confirmDestructive').checked = true;
+  syncRunButton();
+  await runPlan();
+  if (state.run) await runSens();
 }
 
 // ---------- 分析报告导出（HTML，可直接打印成 PDF） ----------
