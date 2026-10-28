@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 一键启动：双击 ReproLab.vbs 走的就是这一条；也可以 `node start.mjs [端口]`。
+// 一键启动：双击 ReproLab.cmd 走的就是这一条；也可以 `node start.mjs [端口]`。
 //
 // 行为：
 //   端口没起 → 后台起静态服务器（日志写 serve.log），等它真的能连上，再打开浏览器；
