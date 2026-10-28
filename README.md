@@ -221,7 +221,6 @@ reprolab/
 ├─ tests/
 │  ├─ kernel.test.mjs       # 48 条单测（node --test 或直接 node 运行）
 │  └─ fixtures/audit-case.json # 审计测试用"一份报告"（5 条结论，1 条被改、1 条缺步骤）
-├─ demo/视频分镜.md          # 5–8 分钟演示视频的分镜与口播要点
 ├─ docs/                    # 界面截图、技术文档、提交清单
 └─ prompts/                 # AI 协同过程记录（30 个 [iter] 提交 + 4 张真界面截图）
 ```
