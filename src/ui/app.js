@@ -283,7 +283,10 @@ function renderPlan(plan) {
     const danger = s.op === 'drop_outliers';
     const params = Object.entries(s.params || {}).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join('  ');
     return `<li class="${danger ? 'danger' : ''}">
-      <div><span class="plan-op">${i + 1}. ${labelOf(s.op)}</span>${danger ? '<span class="tag-danger">需人工确认 · 会删数据</span>' : ''}</div>
+      <div class="plan-row">
+        <span class="plan-op">${i + 1}. ${labelOf(s.op)}</span>${danger ? '<span class="tag-danger">需人工确认 · 会删数据</span>' : ''}
+        <button class="plan-del" data-index="${i}" title="从计划里删掉这一步">✕</button>
+      </div>
       <div class="plan-params">${s.id} · ${s.op} · ${params || '无参数'}</div>
     </li>`;
   }).join('');
@@ -292,6 +295,23 @@ function renderPlan(plan) {
   $('confirmDestructive').checked = false;
   syncRunButton();
 }
+
+/** 人工审阅：允许直接删掉计划的某一步（删完要重新执行） */
+$('planList').addEventListener('click', (e) => {
+  const btn = e.target.closest('.plan-del');
+  if (!btn || !state.plan) return;
+  const idx = Number(btn.dataset.index);
+  const steps = state.plan.steps.filter((_, i) => i !== idx);
+  if (!steps.length) return toast('至少保留一步', 'warn');
+  state.plan = { ...state.plan, steps: steps.map((s, i) => ({ ...s, id: `s${i + 1}` })) };
+  // 结果对应的是旧计划，作废并提示重跑
+  state.run = null;
+  state.claims = [];
+  show('step4', false); show('step5', false);
+  $('hashBox').textContent = '';
+  renderPlan(state.plan);
+  toast(`已删掉第 ${idx + 1} 步，请重新执行`, 'ok');
+});
 
 function labelOf(op) {
   return {
@@ -441,6 +461,52 @@ function droppedPoints(run) {
   return out;
 }
 
+/** 折线图：时间趋势（按记录顺序），叠一条拟合直线 */
+function renderTrendChart(trendStep, run) {
+  const o = trendStep.output;
+  const col = state.dataset.columns.find((c) => c.name === o.column);
+  if (!col) { $('chart').innerHTML = '<div class="hint">没有可画的列</div>'; return; }
+  const dropped = new Set(run.droppedRows || []);
+  const masked = state.dataset.rows.filter((_, i) => !dropped.has(i + 2));
+  const series = [];
+  masked.forEach((row, k) => {
+    const v = Number(row[col.index]);
+    if (Number.isFinite(v)) series.push({ x: k + 1, y: v });
+  });
+  if (series.length < 2) { $('chart').innerHTML = '<div class="hint">有效数据点不足</div>'; return; }
+
+  const W = 520, H = 340, P = 52;
+  const xs = series.map((p) => p.x), ys = series.map((p) => p.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const padY = (maxY - minY) * 0.08 || 1;
+  const y0 = minY - padY, y1 = maxY + padY;
+  const sx = (v) => P + ((v - minX) / (maxX - minX || 1)) * (W - 2 * P);
+  const sy = (v) => H - P - ((v - y0) / (y1 - y0)) * (H - 2 * P);
+
+  const stepN = Math.max(1, Math.ceil(series.length / 400)); // 采样，最多画 400 个点
+  const pts = series.filter((_, i) => i % stepN === 0);
+  const path = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${sx(p.x).toFixed(1)},${sy(p.y).toFixed(1)}`).join(' ');
+  const ticks = Array.from({ length: 5 }, (_, i) => y0 + ((y1 - y0) * i) / 4);
+  const grid = ticks.map((v) => `<line x1="${P}" y1="${sy(v).toFixed(1)}" x2="${W - P}" y2="${sy(v).toFixed(1)}" stroke="#22305c" />
+    <text x="${P - 8}" y="${(sy(v) + 4).toFixed(1)}" fill="#b9c6e8" font-size="10.5" text-anchor="end">${fmtTick(v)}</text>`).join('');
+
+  const lineY = (v) => sy(o.intercept + o.slope * v);
+  const fits = `<line x1="${sx(minX).toFixed(1)}" y1="${lineY(minX).toFixed(1)}" x2="${sx(maxX).toFixed(1)}" y2="${lineY(maxX).toFixed(1)}" stroke="#7be0c4" stroke-width="2" stroke-dasharray="6 4" />`;
+
+  $('chart').innerHTML = `
+    <svg viewBox="0 0 ${W} ${H}" width="100%" height="340" role="img" aria-label="时间趋势折线图">
+      ${grid}
+      <line x1="${P}" y1="${H - P}" x2="${W - P}" y2="${H - P}" stroke="#24305a" />
+      <line x1="${P}" y1="${P}" x2="${P}" y2="${H - P}" stroke="#24305a" />
+      <path d="${path}" fill="none" stroke="#4da3ff" stroke-width="1.6" opacity=".9" />
+      ${fits}
+      <text x="${W / 2}" y="${H - 6}" fill="#cbd6f2" font-size="12" text-anchor="middle">记录顺序（第几行）</text>
+      <text x="${P - 42}" y="${P - 10}" fill="#cbd6f2" font-size="12">y：${escapeHtml(o.column)}</text>
+    </svg>
+    <div class="chart-note">每 100 行变化 ${Number(o.per100).toFixed(3)}　·　R² = ${Number(o.r2).toFixed(4)}　·　n = ${o.n}${pts.length < series.length ? `（折线抽样 ${pts.length} 点）` : ''}</div>`;
+}
+
 function renderChart(run) {
   const has = (op) => run.steps.some((s) => s.op === op);
   if (has('scatter')) return renderScatterChart(run);
@@ -455,6 +521,8 @@ function renderChart(run) {
       stepId: group.id,
     });
   }
+  const trend = run.steps.find((s) => s.op === 'trend');
+  if (trend) return renderTrendChart(trend, run);
   const hist = run.steps.find((s) => s.op === 'histogram');
   if (hist) {
     return renderBars(hist.output.bins.map((b) => ({ label: b.from, value: b.count })), {
