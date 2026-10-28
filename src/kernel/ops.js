@@ -35,9 +35,9 @@ export const OPERATORS = {
   describe: {
     label: '描述统计',
     params: { column: 'string' },
-    run({ dataset, droppedRows }, { column }) {
+    run({ dataset, excludedRows }, { column }) {
       // 若前面删过行，描述统计看到的是删除后的数据（与后续步骤口径一致）
-      const rows = maskRows(dataset, droppedRows);
+      const rows = maskRows(dataset, excludedRows);
       const stats = describe(numericValues({ ...dataset, rows }, column));
       return { kind: 'stats', column, stats, rowsUsed: rows.length };
     },
@@ -46,18 +46,62 @@ export const OPERATORS = {
   drop_outliers: {
     label: '剔除异常点（IQR）',
     params: { column: 'string', k: 'number' },
-    run({ dataset, droppedRows }, { column, k = 1.5 }) {
-      const values = numericValues(dataset, column);
+    run({ dataset, excludedRows }, { column, k = 1.5 }) {
+      const rowsView = maskRows(dataset, excludedRows);
+      const values = numericValues({ ...dataset, rows: rowsView }, column);
+      // 行号要还原成原始 CSV 行号：maskRows 之后下标会变，所以先记住原始行号
+      const keepOriginal = [];
+      const drop = new Set(excludedRows || []);
+      dataset.rows.forEach((_, i) => { if (!drop.has(i + 2)) keepOriginal.push(i + 2); });
       const { outliers, bounds } = detectOutliers(values, k);
       const rows = new Set(outliers.map((o) => o.row));
-      const nextDropped = [...(droppedRows || []), ...rows];
+      // detectOutliers 给的是「掩码后数组下标 + 2」，先换成下标再查原始行号
+      const originalRows = [...rows].map((r) => keepOriginal[r - 2] ?? r).sort((a, b) => a - b);
+      const nextExcluded = [...new Set([...(excludedRows || []), ...originalRows])].sort((a, b) => a - b);
       return {
         kind: 'outliers',
         column, k, bounds,
         outliers,
-        removed: rows.size,
-        droppedRows: nextDropped,
+        removed: originalRows.length,
+        droppedRows: originalRows,
+        excludedRows: nextExcluded,
         preview: outliers.slice(0, 10),
+      };
+    },
+  },
+
+  filter_rows: {
+    label: '条件筛选（保留满足条件的行）',
+    params: { column: 'string', op: 'string', value: 'number' },
+    run({ dataset, excludedRows }, { column, op, value }) {
+      const CMP = {
+        '>': (a, b) => a > b,
+        '>=': (a, b) => a >= b,
+        '<': (a, b) => a < b,
+        '<=': (a, b) => a <= b,
+        '==': (a, b) => a === b,
+        '!=': (a, b) => a !== b,
+      };
+      if (!CMP[op]) throw new Error(`不支持的条件：${op}（可用 > >= < <= == !=）`);
+      const col = dataset.columns.find((c) => c.name === column);
+      if (!col) throw new Error(`找不到列：${column}`);
+      const drop = new Set(excludedRows || []);
+      const kept = [];
+      const excluded = [];
+      dataset.rows.forEach((r, i) => {
+        const rowNo = i + 2;
+        if (drop.has(rowNo)) { excluded.push(rowNo); return; }
+        const v = Number(r[col.index]);
+        if (!Number.isFinite(v)) { excluded.push(rowNo); return; } // 缺失值不满足任何条件
+        (CMP[op](v, value) ? kept : excluded).push(rowNo);
+      });
+      return {
+        kind: 'filter',
+        column, op, value,
+        kept: kept.length,
+        removed: excluded.length - drop.size,
+        filteredRows: excluded.filter((r) => !drop.has(r)),
+        excludedRows: excluded.sort((a, b) => a - b),
       };
     },
   },
@@ -76,8 +120,8 @@ export const OPERATORS = {
   correlate: {
     label: '相关性检验（r / p / n）',
     params: { x: 'string', y: 'string', transformY: 'string?' },
-    run({ dataset, droppedRows, transforms }, { x, y, transformY }) {
-      const rows = maskRows(dataset, droppedRows);
+    run({ dataset, excludedRows, transforms }, { x, y, transformY }) {
+      const rows = maskRows(dataset, excludedRows);
       const xs = numericValues({ ...dataset, rows }, x);
       const ysRaw = numericValues({ ...dataset, rows }, y);
       const ys = transformY === 'ln' ? ysRaw.map((v) => (Number.isFinite(v) && v > 0 ? Math.log(v) : NaN)) : ysRaw;
@@ -96,8 +140,8 @@ export const OPERATORS = {
   fit_linear: {
     label: '线性拟合（斜率/截距/R²）',
     params: { x: 'string', y: 'string', transformY: 'string?' },
-    run({ dataset, droppedRows }, { x, y, transformY }) {
-      const rows = maskRows(dataset, droppedRows);
+    run({ dataset, excludedRows }, { x, y, transformY }) {
+      const rows = maskRows(dataset, excludedRows);
       const xs = numericValues({ ...dataset, rows }, x);
       const ysRaw = numericValues({ ...dataset, rows }, y);
       const ys = transformY === 'ln' ? ysRaw.map((v) => (Number.isFinite(v) && v > 0 ? Math.log(v) : NaN)) : ysRaw;
@@ -113,8 +157,8 @@ export const OPERATORS = {
   scatter: {
     label: '散点图（+拟合线）',
     params: { x: 'string', y: 'string', transformY: 'string?' },
-    run({ dataset, droppedRows }, { x, y, transformY }) {
-      const rows = maskRows(dataset, droppedRows);
+    run({ dataset, excludedRows }, { x, y, transformY }) {
+      const rows = maskRows(dataset, excludedRows);
       const xs = numericValues({ ...dataset, rows }, x);
       const ysRaw = numericValues({ ...dataset, rows }, y);
       const ys = transformY === 'ln' ? ysRaw.map((v) => (Number.isFinite(v) && v > 0 ? Math.log(v) : NaN)) : ysRaw;
@@ -136,8 +180,8 @@ export const OPERATORS = {
   group_summary: {
     label: '分组汇总（按类别算均值/中位数）',
     params: { groupBy: 'string', column: 'string' },
-    run({ dataset, droppedRows }, { groupBy, column }) {
-      const rows = maskRows(dataset, droppedRows);
+    run({ dataset, excludedRows }, { groupBy, column }) {
+      const rows = maskRows(dataset, excludedRows);
       const map = groupValues({ ...dataset, rows }, groupBy, column);
       const groups = [...map.entries()].map(([group, vals]) => {
         const d = describe(vals);
@@ -150,8 +194,8 @@ export const OPERATORS = {
   ttest: {
     label: '两组均值检验（Welch t）',
     params: { groupBy: 'string', column: 'string', groupA: 'string?', groupB: 'string?' },
-    run({ dataset, droppedRows }, { groupBy, column, groupA, groupB }) {
-      const rows = maskRows(dataset, droppedRows);
+    run({ dataset, excludedRows }, { groupBy, column, groupA, groupB }) {
+      const rows = maskRows(dataset, excludedRows);
       const map = groupValues({ ...dataset, rows }, groupBy, column);
       const names = [...map.keys()];
       if (names.length < 2) throw new Error(`分组列 ${groupBy} 只有 ${names.length} 组，做不了两组比较`);
@@ -172,8 +216,8 @@ export const OPERATORS = {
   normalize: {
     label: '标准化 z-score',
     params: { column: 'string' },
-    run({ dataset, droppedRows }, { column }) {
-      const rows = maskRows(dataset, droppedRows);
+    run({ dataset, excludedRows }, { column }) {
+      const rows = maskRows(dataset, excludedRows);
       const s = meanStd(numericValues({ ...dataset, rows }, column));
       if (!s.n) throw new Error(`${column} 没有有效数值`);
       if (!s.std) throw new Error(`${column} 标准差为 0，标准化没有意义`);
@@ -184,8 +228,8 @@ export const OPERATORS = {
   trend: {
     label: '时间趋势（按行序拟合）',
     params: { column: 'string' },
-    run({ dataset, droppedRows }, { column }) {
-      const rows = maskRows(dataset, droppedRows);
+    run({ dataset, excludedRows }, { column }) {
+      const rows = maskRows(dataset, excludedRows);
       const ys = numericValues({ ...dataset, rows }, column);
       const xs = ys.map((_, i) => i + 1);
       const fit = linearFit(xs, ys);
@@ -201,8 +245,8 @@ export const OPERATORS = {
   histogram: {
     label: '分布直方图',
     params: { column: 'string', bins: 'number?' },
-    run({ dataset, droppedRows }, { column, bins = 8 }) {
-      const rows = maskRows(dataset, droppedRows);
+    run({ dataset, excludedRows }, { column, bins = 8 }) {
+      const rows = maskRows(dataset, excludedRows);
       const h = histogram(numericValues({ ...dataset, rows }, column), Math.max(2, Math.min(20, Number(bins) || 8)));
       const peak = h.bins.reduce((best, b) => (b.count > best.count ? b : best), h.bins[0]);
       return {
@@ -215,8 +259,8 @@ export const OPERATORS = {
   missing_report: {
     label: '缺失值盘点',
     params: { column: 'string' },
-    run({ dataset, droppedRows }, { column }) {
-      const rows = maskRows(dataset, droppedRows);
+    run({ dataset, excludedRows }, { column }) {
+      const rows = maskRows(dataset, excludedRows);
       const items = pairsOf({ ...dataset, rows }, column);
       const missing = items.filter((it) => {
         const s = String(it.raw ?? '').trim();
@@ -232,8 +276,8 @@ export const OPERATORS = {
 };
 
 /** 把被剔除的行屏蔽掉（按 CSV 行号；行号 = 数据行下标 + 2） */
-function maskRows(dataset, droppedRows) {
-  if (!droppedRows || droppedRows.length === 0) return dataset.rows;
-  const drop = new Set(droppedRows);
+function maskRows(dataset, excludedRows) {
+  if (!excludedRows || excludedRows.length === 0) return dataset.rows;
+  const drop = new Set(excludedRows);
   return dataset.rows.filter((_, i) => !drop.has(i + 2));
 }

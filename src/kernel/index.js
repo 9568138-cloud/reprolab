@@ -49,7 +49,7 @@ export function validatePlan(plan, dataset) {
 }
 
 /** 产物指纹的唯一口径：导出、复跑校验、复现包自校验都用这个函数 */
-export function canonicalArtifact(plan, steps, droppedRows) {
+export function canonicalArtifact(plan, steps, excludedRows) {
   return {
     plan: {
       version: plan.version,
@@ -57,7 +57,7 @@ export function canonicalArtifact(plan, steps, droppedRows) {
       steps: plan.steps.map((s) => ({ id: s.id, op: s.op, params: s.params || {} })),
     },
     outputs: steps.map((s) => ({ id: s.id, op: s.op, output: s.output })),
-    droppedRows: droppedRows || [],
+    excludedRows: excludedRows || [],
   };
 }
 
@@ -65,7 +65,7 @@ export function canonicalArtifact(plan, steps, droppedRows) {
 export async function executePlan(plan, dataset) {
   validatePlan(plan, dataset);
   const steps = [];
-  const state = { dataset, droppedRows: [], transforms: [] };
+  const state = { dataset, excludedRows: [], droppedRows: [], filteredRows: [], transforms: [] };
   const inputHashes = [];
 
   for (const step of plan.steps) {
@@ -76,7 +76,9 @@ export async function executePlan(plan, dataset) {
     const ms = Math.max(0, performanceNow() - t0);
     const outputHash = await sha256(stableStringify(output));
 
+    if (output.excludedRows) state.excludedRows = output.excludedRows;
     if (output.droppedRows) state.droppedRows = output.droppedRows;
+    if (output.filteredRows) state.filteredRows = output.filteredRows;
     if (output.transform === 'ln') state.transforms.push({ column: output.column, transform: 'ln' });
 
     steps.push({
@@ -93,16 +95,23 @@ export async function executePlan(plan, dataset) {
     inputHashes.push(inputHash);
   }
 
-  const artifact = canonicalArtifact(plan, steps, state.droppedRows);
+  const artifact = canonicalArtifact(plan, steps, state.excludedRows);
   const artifactHash = await sha256(stableStringify(artifact));
-  return { steps, artifact, artifactHash, droppedRows: state.droppedRows };
+  return {
+    steps,
+    artifact,
+    artifactHash,
+    excludedRows: state.excludedRows,
+    droppedRows: state.droppedRows,
+    filteredRows: state.filteredRows,
+  };
 }
 
 function snapshot(state) {
   return {
     rows: state.dataset.rows.length,
     columns: state.dataset.columns.map((c) => `${c.name}:${c.kind}`),
-    droppedRows: [...(state.droppedRows || [])].sort((a, b) => a - b),
+    excludedRows: [...(state.excludedRows || [])].sort((a, b) => a - b),
     transforms: state.transforms,
   };
 }

@@ -157,15 +157,17 @@ const INTENTS = [
   { op: 'ttest', label: '两组比较', need: 'group', hint: 'Welch t 检验，看差异显不显著' },
   { op: 'histogram', label: '分布直方图', hint: '看数据落在哪些区间' },
   { op: 'trend', label: '时间趋势', hint: '按行序做线性趋势' },
+  { op: 'filter_rows', label: '条件筛选', need: 'filter', hint: '只看满足条件的行：列 + 比较符 + 阈值' },
   { op: 'missing_report', label: '缺失盘点', hint: '数有多少空单元格' },
 ];
-const INTENT_ORDER = ['missing_report', 'normalize', 'drop_outliers', 'transform_log', 'group_summary', 'ttest', 'correlate', 'fit_linear', 'trend', 'histogram', 'scatter'];
+const INTENT_ORDER = ['filter_rows', 'missing_report', 'normalize', 'drop_outliers', 'transform_log', 'group_summary', 'ttest', 'correlate', 'fit_linear', 'trend', 'histogram', 'scatter'];
 const selectedOps = new Set();
 
 function renderIntentChips() {
   const hasGroup = !!getGroupColumns().length;
+  const hasNumeric = (state.dataset?.columns || []).some((c) => c.kind === 'number');
   $('intentChips').innerHTML = INTENTS.map((it) => {
-    const blocked = it.need === 'group' && !hasGroup;
+    const blocked = (it.need === 'group' && !hasGroup) || (it.need === 'filter' && !hasNumeric);
     const active = selectedOps.has(it.op);
     return `<button class="intent${active ? ' on' : ''}${it.danger ? ' danger' : ''}${blocked ? ' blocked' : ''}"
       data-op="${it.op}" ${blocked ? 'disabled' : ''} title="${escapeHtml(it.hint)}">${it.label}</button>`;
@@ -177,6 +179,7 @@ function renderIntentChips() {
       ? '点上面的按钮选要做的事（可多选），再点「生成计划」'
       : `已选 ${n} 项：${[...selectedOps].map((op) => labelOf(op)).join('、')}`;
   $('buildBtn').disabled = !state.dataset || n === 0;
+  $('filterRow').classList.toggle('hidden', !selectedOps.has('filter_rows'));
 }
 
 $('intentChips').addEventListener('click', (e) => {
@@ -197,6 +200,7 @@ function fillColumnSelects() {
   const groups = getGroupColumns();
   const opts = nums.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('');
   $('colY').innerHTML = opts;
+  $('filterCol').innerHTML = opts;
   $('colX').innerHTML = opts;
   $('colGroup').innerHTML = groups.length
     ? groups.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('')
@@ -243,9 +247,18 @@ function buildPlanFromOptions() {
   const picked = INTENT_ORDER.filter((op) => selectedOps.has(op));
   if (!picked.length) throw new Error('至少选一项');
 
-  const steps = [{ id: 's1', op: 'describe', params: { column: y } }];
+  // 筛选要排在描述统计之前：先圈定数据范围，后面的统计才有意义
+  const pre = [];
+  const steps = [];
   for (const op of picked) {
     let params;
+    if (op === 'filter_rows') {
+      const fv = Number($('filterValue').value);
+      if (!Number.isFinite(fv)) throw new Error('条件筛选需要一个阈值（数字）');
+      params = { column: $('filterCol').value || y, op: $('filterOp').value, value: fv };
+      pre.push({ op, params });
+      continue;
+    }
     if (op === 'correlate' || op === 'fit_linear' || op === 'scatter') params = { x, y };
     else if (op === 'drop_outliers') params = { column: y, k: 1.5, confirm: true };
     else if (op === 'histogram') params = { column: y, bins: 8 };
@@ -253,14 +266,15 @@ function buildPlanFromOptions() {
       if (!group) throw new Error('这份数据没有文本列，分组类分析用不了');
       params = { groupBy: group, column: y };
     } else params = { column: y };
-    steps.push({ id: `s${steps.length + 1}`, op, params });
+    steps.push({ op, params });
   }
+  const ordered = [...pre, { op: 'describe', params: { column: y } }, ...steps];
 
   const plan = {
     version: 1,
     question: [...selectedOps].map((op) => labelOf(op)).join(' + '),
     engine: 'options',
-    steps,
+    steps: ordered.map((s, i) => ({ id: `s${i + 1}`, ...s })),
   };
   validatePlan(plan, state.dataset);
   return plan;
@@ -351,6 +365,7 @@ function labelOf(op) {
     correlate: '相关性检验', fit_linear: '线性拟合', scatter: '散点图',
     group_summary: '分组汇总', ttest: '两组均值检验（Welch t）', normalize: '标准化 z-score',
     trend: '时间趋势', histogram: '分布直方图', missing_report: '缺失值盘点',
+    filter_rows: '条件筛选',
   }[op] || op;
 }
 
@@ -469,15 +484,21 @@ function renderClaims(claims, run) {
 }
 
 function renderDropped(run) {
-  const rows = run.droppedRows || [];
-  if (!rows.length) { $('droppedBox').innerHTML = ''; show('droppedBox', false); return; }
-  const shown = rows.slice(0, 24);
-  const rest = rows.length - shown.length;
-  $('droppedBox').innerHTML = `<span class="dropped-title">本次删除了 ${rows.length} 行原始数据</span>` +
+  const dropped = run.droppedRows || [];
+  const filtered = run.filteredRows || [];
+  const excluded = run.excludedRows || [];
+  if (!excluded.length) { $('droppedBox').innerHTML = ''; show('droppedBox', false); return; }
+  const parts = [];
+  if (dropped.length) parts.push(`剔除异常点 ${dropped.length} 行`);
+  if (filtered.length) parts.push(`条件筛选 ${filtered.length} 行`);
+  const shown = excluded.slice(0, 24);
+  const rest = excluded.length - shown.length;
+  const remaining = (state.dataset?.rowCount || 0) - excluded.length;
+  $('droppedBox').innerHTML = `<span class="dropped-title">本次排除了 ${excluded.length} 行原始数据（${parts.join('，')}）</span>` +
     shown.map((r) => `<span class="chip chip-danger">CSV 第 ${r} 行</span>`).join('') +
-    (rest > 0 ? `<span class="chip">…等共 ${rows.length} 行（完整清单在复现包 run.json 里）</span>` : '') +
-    '<button class="btn ghost small" id="undoDrop">撤回这次删除</button>' +
-    '<span class="hint">撤回后按完整数据重算，产物哈希会变（已导出的复现包不受影响）。</span>';
+    (rest > 0 ? `<span class="chip">…等共 ${excluded.length} 行（完整清单在复现包 run.json 里）</span>` : '') +
+    (dropped.length ? '<button class="btn ghost small" id="undoDrop">撤回剔除异常点</button>' : '') +
+    `<span class="hint">后面的统计基于剩下的 ${remaining} 行；条件筛选要在计划卡里删掉那一步才能恢复。</span>`;
   show('droppedBox', true);
 }
 
@@ -489,7 +510,7 @@ $('droppedBox').addEventListener('click', async (e) => {
 async function undoDrop() {
   if (!state.plan || !state.run) return;
   const next = withoutDropOutliers(state.plan);
-  if (!next) return toast('本次计划里没有可撤回的删除步骤', 'warn');
+  if (!next) return toast('本次计划里没有可撤回的剔除步骤', 'warn');
   const btn = $('undoDrop');
   if (btn) btn.disabled = true;
   try {

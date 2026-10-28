@@ -8,7 +8,7 @@ import { renderClaim } from '../planner.js';
 export async function buildReproducePackage({ rawCsv, dataset, plan, run, claims, meta = {} }) {
   const dataHash = await sha256(rawCsv);
   const rendered = claims.map((c) => ({ ...c, text: renderClaim(c, run.steps) }));
-  const artifact = canonicalArtifact(plan, run.steps, run.droppedRows);
+  const artifact = canonicalArtifact(plan, run.steps, run.excludedRows);
   const generatedAt = new Date().toISOString();
 
   const report = [
@@ -31,7 +31,15 @@ export async function buildReproducePackage({ rawCsv, dataset, plan, run, claims
     '| --: | :-- | :-- | :-- | :-- | --: |',
     ...run.steps.map((s, i) => `| ${i + 1} | ${s.label} | \`${stableStringify(s.params)}\` | \`${s.inputHash.slice(0, 12)}\` | \`${s.outputHash.slice(0, 12)}\` | ${s.ms} |`),
     '',
-    run.droppedRows?.length ? `> 本计划删除了 ${run.droppedRows.length} 行原始数据（CSV 行号：${run.droppedRows.join(', ')}），删了什么可在这里核对。` : '> 本计划未删除任何原始数据行。',
+    (() => {
+      if (!run.excludedRows?.length) return '> 本计划没有排除任何原始数据行。';
+      const parts = [];
+      if (run.droppedRows?.length) parts.push(`剔除异常点 ${run.droppedRows.length} 行`);
+      if (run.filteredRows?.length) parts.push(`条件筛选 ${run.filteredRows.length} 行`);
+      const detail = parts.length ? `（${parts.join('，')}）` : '';
+      const list = run.excludedRows.slice(0, 40).join(', ');
+      return `> 本计划排除了 ${run.excludedRows.length} 行原始数据${detail}：${list}${run.excludedRows.length > 40 ? ' …' : ''}。可在这里核对。`;
+    })(),
     '',
     '## 如何复现（两种，任选其一）',
     '',
@@ -70,7 +78,9 @@ export async function buildReproducePackage({ rawCsv, dataset, plan, run, claims
       name: 'run.json',
       text: JSON.stringify({
         artifactHash: run.artifactHash,
+        excludedRows: run.excludedRows || [],
         droppedRows: run.droppedRows || [],
+        filteredRows: run.filteredRows || [],
         steps: run.steps.map(publicStep),
       }, null, 2),
     },
@@ -137,7 +147,7 @@ const artifact = {
     steps: plan.steps.map((s) => ({ id: s.id, op: s.op, params: s.params || {} })),
   },
   outputs: run.steps.map((s) => ({ id: s.id, op: s.op, output: s.output })),
-  droppedRows: run.droppedRows || [],
+  excludedRows: run.excludedRows || [],
 };
 const recomputed = sha(stable(artifact));
 check('产物哈希可重算（执行记录未被篡改）', recomputed === run.artifactHash, recomputed.slice(0, 16) + '…');

@@ -339,3 +339,47 @@ test('数据体检：缺失率、唯一值、常量列与范围', async () => {
   assert.ok(warnings.some((w) => w.includes('c') && w.includes('常量')));
   assert.equal(columnProfile(d, d.columns[0]).kind, 'number');
 });
+
+// ---------- 条件筛选 ----------
+test('条件筛选：只保留满足条件的行，下游统计随之变化', async () => {
+  const d = ds(iris);
+  const run = await executePlan({
+    version: 1,
+    steps: [
+      { id: 's1', op: 'filter_rows', params: { column: 'petal_length_cm', op: '>', value: 4 } },
+      { id: 's2', op: 'describe', params: { column: 'petal_width_cm' } },
+    ],
+  }, d);
+  const f = run.steps[0].output;
+  assert.equal(f.kept, 84, 'iris 里花瓣长 > 4 的有 84 行');
+  assert.equal(f.removed, d.rowCount - 84);
+  assert.equal(run.excludedRows.length, d.rowCount - 84);
+  assert.equal(run.steps[1].output.rowsUsed, 84);
+  const claim = buildClaims({ version: 1, steps: [] }, run.steps)[0];
+  assert.match(renderClaim(claim, run.steps), /保留 84 行/);
+});
+
+test('条件筛选：与剔除异常点叠加时行号不串（回归：曾差 1 行）', async () => {
+  const d = ds(iris);
+  const run = await executePlan({
+    version: 1,
+    steps: [
+      { id: 's1', op: 'filter_rows', params: { column: 'petal_length_cm', op: '>=', value: 3 } },
+      { id: 's2', op: 'drop_outliers', params: { column: 'petal_width_cm', k: 1.5, confirm: true } },
+      { id: 's3', op: 'correlate', params: { x: 'petal_length_cm', y: 'petal_width_cm' } },
+    ],
+  }, d);
+  const f = run.steps[0].output;
+  const drop = run.steps[1].output;
+  const filteredSet = new Set(f.filteredRows);
+  assert.equal(drop.droppedRows.filter((r) => filteredSet.has(r)).length, 0, '剔除的行不应落在筛选已排除的行里');
+  assert.equal(run.steps[2].output.n, f.kept - drop.removed, '相关性样本数 = 筛选后行数 - 剔除行数');
+  assert.equal(run.excludedRows.length, d.rowCount - run.steps[2].output.n);
+});
+
+test('条件筛选：非法比较符在执行期被拒绝', async () => {
+  await assert.rejects(
+    () => executePlan({ version: 1, steps: [{ id: 's1', op: 'filter_rows', params: { column: 'petal_length_cm', op: '像', value: 1 } }] }, ds(iris)),
+    /不支持的条件/,
+  );
+});

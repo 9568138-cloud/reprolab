@@ -102,6 +102,19 @@
 
     <div id="askOptions">
       <div class="chip-grid" id="intentChips"></div>
+      <div class="col-row filter-row hidden" id="filterRow">
+        <label class="col-pick">筛选用列<select id="filterCol"></select></label>
+        <label class="col-pick">条件<select id="filterOp">
+          <option value=">">&gt; 大于</option>
+          <option value=">=">&ge; 不小于</option>
+          <option value="<">&lt; 小于</option>
+          <option value="<=">&le; 不大于</option>
+          <option value="==">= 等于</option>
+          <option value="!=">&ne; 不等于</option>
+        </select></label>
+        <label class="col-pick">阈值<input id="filterValue" class="inline-num" type="number" step="any" placeholder="例如 101" /></label>
+        <span class="hint">筛选会排除不满足条件的行（含缺失值），清单可在结果区核对</span>
+      </div>
       <div class="col-row">
         <label class="col-pick">主列 y<select id="colY"></select></label>
         <label class="col-pick">对比列 x<select id="colX"></select></label>

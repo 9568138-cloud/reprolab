@@ -9,6 +9,7 @@ const KEYWORDS = [
   { op: 'ttest', words: ['两组', 't 检验', 't检验', '均值差', '差异显著', '显著差异'] },
   { op: 'group_summary', words: ['分组', '各组', '按类别', '每类', '各类', '不同班', '对比各组'] },
   { op: 'histogram', words: ['分布', '直方图', '频数', '区间分布'] },
+  { op: 'filter_rows', words: ['筛选', '只看', '只保留', '过滤', '大于', '小于', '超过', '至少', '不超过', '不低于'] },
   { op: 'trend', words: ['随时间', '时间序列', '变化趋势', '逐日', '逐行'] },
   { op: 'drop_outliers', words: ['异常', '离群', '野值', '剔除', '去掉', '删掉', '噪'] },
   { op: 'transform_log', words: ['对数', 'log', 'ln', '指数关系', '幂', '倍数'] },
@@ -57,6 +58,20 @@ export function compileByRules(dataset, question) {
   const steps = [];
   const push = (op, params) => steps.push({ id: `s${steps.length + 1}`, op, params });
 
+  // 条件筛选要放在最前面：先圈定人群，后面的统计才有意义
+  if (hits.has('filter_rows')) {
+    const numMatch = question.match(/-?\d+(?:\.\d+)?/);
+    if (numMatch) {
+      const value = Number(numMatch[0]);
+      const op = /不超过|不大于|小于|低于|以内/.test(question) ? '<='
+        : /至少|不低于|不少于|大于等于/.test(question) ? '>='
+          : /大于|超过|高于/.test(question) ? '>'
+            : '<';
+      const filterCol = nums.find((c) => question.includes(c.name))?.name || y;
+      steps.push({ id: 's0', op: 'filter_rows', params: { column: filterCol, op, value } });
+    }
+  }
+
   steps.push({ id: 's1', op: 'describe', params: { column: y } });
 
   if (hits.has('missing_report')) push('missing_report', { column: y });
@@ -80,7 +95,9 @@ export function compileByRules(dataset, question) {
     push('scatter', { x, y, ...(wantLog ? { transformY: 'ln' } : {}) });
   }
 
-  const plan = { version: 1, question, engine: 'rules', steps };
+  // 统一重排 step id（筛选步骤可能是 s0 开头的）
+  const normalized = steps.map((s, i) => ({ ...s, id: `s${i + 1}` }));
+  const plan = { version: 1, question, engine: 'rules', steps: normalized };
   validatePlan(plan, dataset);
   return plan;
 }
@@ -164,6 +181,17 @@ export function buildClaims(plan, steps) {
         { stepId: gp.id, field: 'topN', value: o.top.n },
       ],
       verdict: `共 ${o.groups.length} 个类别，按均值降序`,
+    });
+  }
+
+  const fl = byOp('filter_rows')[0];
+  if (fl) {
+    const o = fl.output;
+    claims.push({
+      id: 'c9',
+      text: `按 ${o.column} ${o.op} ${o.value} 筛选，保留 {{kept}} 行（排除 ${o.removed} 行）`,
+      refs: [{ stepId: fl.id, field: 'kept', value: o.kept }, { stepId: fl.id, field: 'removed', value: o.removed }],
+      verdict: o.removed > 0 ? '已排除不满足条件的行' : '全部满足条件',
     });
   }
 
