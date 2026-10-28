@@ -441,3 +441,17 @@ test('条件筛选：文本列支持 == / !=，且拒绝大小比较', async () 
 test('白名单：文本列的 filter value 允许字符串（any 类型不误报）', () => {
   assert.ok(validatePlan({ version: 1, steps: [{ id: 's1', op: 'filter_rows', params: { column: 'species', op: '==', value: 'setosa' } }] }, ds(iris)));
 });
+
+// ---------- 列类型手改：单位换算 ----------
+test('按数值解析：去掉千分位与单位，万/亿 换算，解析不了的按缺失', async () => {
+  const { forceNumericColumn } = await import('../src/kernel/profile.js');
+  const d = ds('city,price\n北京,12.5 万\n上海,"138,000"\n深圳,未知\n广州,\n杭州,9.8万\n');
+  const r = forceNumericColumn(d, 'price');
+  assert.equal(r.parsed, 3);
+  assert.equal(r.failed, 1);
+  assert.equal(r.scaled, 2);
+  assert.equal(r.dataset.columns.find((c) => c.name === 'price').kind, 'number');
+  assert.deepEqual(r.dataset.rows.map((row) => row[1]), ['125000', '138000', '', '', '98000']);
+  const again = forceNumericColumn(r.dataset, 'price');
+  assert.equal(again.already, true, '已经是数值列时不再重复转换');
+});

@@ -1,5 +1,5 @@
 import { toDataset } from '../kernel/csv.js';
-import { columnProfiles, profileWarnings } from '../kernel/profile.js';
+import { columnProfiles, profileWarnings, forceNumericColumn } from '../kernel/profile.js';
 import { executePlan, validatePlan } from '../kernel/index.js';
 import { compileByRules, compileByLLM, buildClaims, renderClaim, groupCandidates, withoutDropOutliers } from '../planner.js';
 import { sha256, shortHash } from '../kernel/hash.js';
@@ -103,12 +103,14 @@ function renderProfile(dataset) {
     const range = p.kind === 'number' && p.min !== undefined
       ? `${fmt(p.min)} ~ ${fmt(p.max)}（均值 ${fmt(p.mean)}）`
       : p.top !== undefined ? `最常见「${fmt(p.top)}」×${p.topCount}` : '—';
+    const isText = p.kind !== 'number' && p.digitRatio >= 0.5; // 一半以上取值含数字才提示可以当数值用
+    const action = isText ? `<button class="btn ghost small" data-force-num="${escapeHtml(p.name)}" title="去掉单位/千分位，尽量解析成数字">按数值解析</button>` : '';
     return `<tr class="${bad ? 'bad' : ''}">
       <td>${escapeHtml(p.name)}<span class="kind">${p.kind === 'number' ? '数值' : '文本'}</span></td>
       <td class="num">${p.n}</td>
       <td class="num ${p.missing ? 'warn' : ''}">${p.missing}${p.missing ? `（${(p.missingRate * 100).toFixed(1)}%）` : ''}</td>
       <td class="num">${p.unique}</td>
-      <td>${range}</td>
+      <td>${range}${action ? ' ' + action : ''}</td>
     </tr>`;
   }).join('');
   $('dataProfile').innerHTML = `
@@ -121,6 +123,30 @@ function renderProfile(dataset) {
     </div>`;
   show('dataProfile', true);
 }
+
+// 文本列一键当数值用（去掉单位/千分位，「万/亿」会换算）
+$('dataProfile').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-force-num]');
+  if (!btn || !state.dataset) return;
+  const name = btn.getAttribute('data-force-num');
+  try {
+    const res = forceNumericColumn(state.dataset, name);
+    if (res.already) return toast(`${name} 已经是数值列了`, 'warn');
+    state.dataset = res.dataset;
+    state.plan = null;
+    state.run = null;
+    show('step3', false); show('step4', false); show('step5', false);
+    renderProfile(state.dataset);
+    renderPreview(state.dataset);
+    fillColumnSelects();
+    renderIntentChips();
+    const extra = [res.scaled ? `${res.scaled} 行按 万/亿/千 换算` : '', res.failed ? `${res.failed} 行无法解析、按缺失处理` : ''].filter(Boolean).join('，');
+    toast(`${name} 已按数值解析（${res.parsed} 行${extra ? '；' + extra : ''}）`, 'ok');
+  } catch (err) {
+    toast(`解析失败：${err.message}`, 'error');
+  }
+});
+
 const dropzone = $('dropzone');
 dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('drag'); });
 dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
@@ -217,6 +243,7 @@ function generateFromOptions() {
   try {
     const plan = buildPlanFromOptions();
     state.plan = plan;
+    rememberPlan(plan);
     renderPlan(plan);
     show('step3', true);
     $('step3').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -307,6 +334,7 @@ async function compilePlan() {
       plan = compileByRules(state.dataset, question);
     }
     state.plan = plan;
+    rememberPlan(plan);
     renderPlan(plan);
     $('compileHint').textContent = plan.engine === 'llm' ? 'LLM 编译通过白名单校验' : '本地规则编译（离线可复现）';
     show('step3', true);
@@ -386,6 +414,59 @@ $('copyPlan').addEventListener('click', async () => {
   }
 });
 
+// ---------- 最近计划（localStorage，最近 5 个） ----------
+const HISTORY_KEY = 'reprolab.planHistory';
+
+function readHistory() {
+  try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch { return []; }
+}
+
+function planSignature(p) {
+  return JSON.stringify(p.steps.map((s) => [s.op, s.params]));
+}
+
+function rememberPlan(plan) {
+  try {
+    const list = readHistory().filter((x) => planSignature(x.plan) !== planSignature(plan));
+    list.unshift({ at: Date.now(), question: plan.question || '(未命名)', engine: plan.engine || 'rules', plan });
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, 5)));
+  } catch { /* localStorage 不可用就算了，不影响主流程 */ }
+}
+
+$('planHistoryBtn').addEventListener('click', () => {
+  const box = $('planHistory');
+  const list = readHistory();
+  if (!list.length) return toast('还没有历史计划——生成或导入一次就会记下来', 'warn');
+  box.innerHTML = '<div class="plan-history-head">最近 5 个计划<span class="hint">点「恢复」会用当前数据重新校验</span></div>' +
+    list.map((x, i) => `<div class="plan-history-row">
+      <span class="when">${new Date(x.at).toLocaleString('zh-CN', { hour12: false }).slice(5, 16)}</span>
+      <span>${escapeHtml(String(x.question).slice(0, 38))}</span>
+      <span class="why">${x.plan.steps.length} 步</span>
+      <button class="btn ghost small" data-restore="${i}">恢复</button>
+    </div>`).join('');
+  box.classList.remove('hidden');
+});
+
+$('planHistory').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-restore]');
+  if (!btn) return;
+  if (!state.dataset) return toast('先载入数据，再恢复计划', 'warn');
+  const entry = readHistory()[Number(btn.dataset.restore)];
+  if (!entry) return;
+  try {
+    validatePlan(entry.plan, state.dataset);
+  } catch (err) {
+    return toast(`这份计划和当前数据对不上：${err.message}`, 'error');
+  }
+  state.plan = entry.plan;
+  state.run = null;
+  show('step4', false); show('step5', false);
+  renderPlan(entry.plan);
+  show('step3', true);
+  $('planHistory').classList.add('hidden');
+  toast('已恢复历史计划，点「执行计划」重算', 'ok');
+});
+
 // ---------- 计划的导出 / 导入 ----------
 $('exportPlan').addEventListener('click', () => {
   if (!state.plan) return toast('先生成一份计划', 'warn');
@@ -410,6 +491,7 @@ $('planFile').addEventListener('change', async (e) => {
     state.claims = [];
     show('step4', false); show('step5', false);
     $('hashBox').textContent = '';
+    rememberPlan(plan);
     renderPlan(plan);
     show('step3', true);
     toast(`已导入 ${plan.steps.length} 步计划（已过白名单校验）`, 'ok');

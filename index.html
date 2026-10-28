@@ -154,6 +154,7 @@
       <span class="hint" id="planEngine"></span>
     </div>
     <ol class="plan-list" id="planList"></ol>
+    <div id="planHistory" class="plan-history hidden"></div>
     <div id="confirmGate" class="gate hidden">
       <label><input type="checkbox" id="confirmDestructive" /> 我确认：上面的“剔除异常点”会删掉数据行，删了什么可回看、可撤回。</label>
     </div>
@@ -169,6 +170,7 @@
         <button class="btn ghost" id="exportPlan">导出计划（plan.json）</button>
         <input type="file" id="planFile" accept=".json,application/json" hidden />
         <button class="btn ghost" id="importPlan">导入计划</button>
+        <button class="btn ghost" id="planHistoryBtn">最近计划</button>
         <span class="hint">计划是显式 JSON：同一份数据 + 同一份计划，换台机器也能跑出同一哈希。</span>
       </div>
     </details>
