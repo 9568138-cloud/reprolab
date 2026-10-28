@@ -72,7 +72,7 @@ export const OPERATORS = {
 
   filter_rows: {
     label: '条件筛选（保留满足条件的行）',
-    params: { column: 'string', op: 'string', value: 'number' },
+    params: { column: 'string', op: 'string', value: 'any' },
     run({ dataset, excludedRows }, { column, op, value }) {
       const CMP = {
         '>': (a, b) => a > b,
@@ -85,19 +85,29 @@ export const OPERATORS = {
       if (!CMP[op]) throw new Error(`不支持的条件：${op}（可用 > >= < <= == !=）`);
       const col = dataset.columns.find((c) => c.name === column);
       if (!col) throw new Error(`找不到列：${column}`);
+      const isText = col.kind === 'string';
+      if (isText && op !== '==' && op !== '!=') throw new Error(`文本列 ${column} 只支持 == 或 != 比较`);
+      const target = isText ? String(value).trim() : Number(value);
+      if (!isText && !Number.isFinite(target)) throw new Error(`阈值必须是数字：${value}`);
       const drop = new Set(excludedRows || []);
       const kept = [];
       const excluded = [];
       dataset.rows.forEach((r, i) => {
         const rowNo = i + 2;
         if (drop.has(rowNo)) { excluded.push(rowNo); return; }
-        const v = Number(r[col.index]);
-        if (!Number.isFinite(v)) { excluded.push(rowNo); return; } // 缺失值不满足任何条件
-        (CMP[op](v, value) ? kept : excluded).push(rowNo);
+        const raw = String(r[col.index] ?? '').trim();
+        if (raw === '') { excluded.push(rowNo); return; } // 缺失值不满足任何条件
+        if (isText) {
+          (CMP[op](raw, target) ? kept : excluded).push(rowNo);
+          return;
+        }
+        const v = Number(raw);
+        if (!Number.isFinite(v)) { excluded.push(rowNo); return; }
+        (CMP[op](v, target) ? kept : excluded).push(rowNo);
       });
       return {
         kind: 'filter',
-        column, op, value,
+        column, op, value: target,
         kept: kept.length,
         removed: excluded.length - drop.size,
         filteredRows: excluded.filter((r) => !drop.has(r)),

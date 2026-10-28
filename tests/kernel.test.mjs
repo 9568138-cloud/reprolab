@@ -415,3 +415,29 @@ test('复现包：带图表时多一个 chart.svg', async () => {
   const noChart = await buildReproducePackage({ rawCsv: iris, dataset: d, plan, run, claims, meta: {} });
   assert.ok(!noChart.files.some((f) => f.name === 'chart.svg'));
 });
+
+// ---------- 文本列筛选（图表下钻用到） ----------
+test('条件筛选：文本列支持 == / !=，且拒绝大小比较', async () => {
+  const d = ds(iris);
+  const run = await executePlan({
+    version: 1,
+    steps: [
+      { id: 's1', op: 'filter_rows', params: { column: 'species', op: '==', value: 'setosa' } },
+      { id: 's2', op: 'describe', params: { column: 'petal_length_cm' } },
+    ],
+  }, d);
+  assert.equal(run.steps[0].output.kept, 50);
+  assert.equal(run.steps[1].output.stats.mean, 1.462);
+
+  const notSetosa = await executePlan({ version: 1, steps: [{ id: 's1', op: 'filter_rows', params: { column: 'species', op: '!=', value: 'setosa' } }] }, d);
+  assert.equal(notSetosa.steps[0].output.kept, 100);
+
+  await assert.rejects(
+    () => executePlan({ version: 1, steps: [{ id: 's1', op: 'filter_rows', params: { column: 'species', op: '>', value: 'setosa' } }] }, d),
+    /只支持 == 或 !=/,
+  );
+});
+
+test('白名单：文本列的 filter value 允许字符串（any 类型不误报）', () => {
+  assert.ok(validatePlan({ version: 1, steps: [{ id: 's1', op: 'filter_rows', params: { column: 'species', op: '==', value: 'setosa' } }] }, ds(iris)));
+});

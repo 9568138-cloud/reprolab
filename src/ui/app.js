@@ -621,6 +621,7 @@ function renderChart(run) {
       xLabel: group.output.groupBy,
       yLabel: group.output.column,
       stepId: group.id,
+      drill: { column: group.output.groupBy },
     });
   }
   const trend = run.steps.find((s) => s.op === 'trend');
@@ -634,8 +635,8 @@ function renderChart(run) {
   $('chart').innerHTML = '<div class="hint">本次计划没有绘图步骤</div>';
 }
 
-/** 柱状图：分组均值 / 直方图共用 */
-function renderBars(items, { title, xLabel, yLabel, stepId }) {
+/** 柱状图：分组均值 / 直方图共用；给 drill 时柱子可点，点了自动加一条筛选 */
+function renderBars(items, { title, xLabel, yLabel, stepId, drill = null }) {
   if (!items.length) { $('chart').innerHTML = '<div class="hint">没有可画的数据</div>'; return; }
   const W = 520, H = 340, P = 52;
   const maxV = Math.max(...items.map((i) => i.value), 1e-9);
@@ -655,9 +656,11 @@ function renderBars(items, { title, xLabel, yLabel, stepId }) {
     const y = sy(it.value);
     const h = Math.max(1, H - P - y);
     const color = it.label === 'A' ? '#4da3ff' : it.label === 'B' ? '#7be0c4' : '#4da3ff';
-    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="4" fill="${color}" opacity=".85"><title>${escapeHtml(String(it.label))}: ${it.value}</title></rect>
+    const drillAttrs = drill ? ` data-drill-col="${escapeHtml(drill.column)}" data-drill-value="${escapeHtml(String(it.label))}"` : '';
+    const cursor = drill ? ' style="cursor:pointer"' : '';
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" rx="4" fill="${color}" opacity=".85"${drillAttrs}${cursor}><title>${escapeHtml(String(it.label))}: ${it.value}${drill ? '（点击只看这一组）' : ''}</title></rect>
       <text x="${(x + w / 2).toFixed(1)}" y="${(y - 6).toFixed(1)}" fill="#cbd6f2" font-size="10.5" text-anchor="middle">${fmtTick(it.value)}</text>
-      <text x="${(x + w / 2).toFixed(1)}" y="${H - P + 16}" fill="#b9c6e8" font-size="10.5" text-anchor="middle">${escapeHtml(String(it.label))}</text>
+      <text x="${(x + w / 2).toFixed(1)}" y="${H - P + 16}" fill="#b9c6e8" font-size="10.5" text-anchor="middle"${drillAttrs}${cursor}>${escapeHtml(String(it.label))}</text>
       ${it.sub ? `<text x="${(x + w / 2).toFixed(1)}" y="${H - P + 30}" fill="#8fa0cc" font-size="9.5" text-anchor="middle">${it.sub}</text>` : ''}`;
   }).join('');
 
@@ -1152,6 +1155,24 @@ footer{margin-top:28px;color:#8a93a5;font-size:12px}
 }
 
 /** 图表导出：SVG 直接序列化，PNG 用 canvas 光栅化（2 倍图） */
+/** 图表下钻：点某个分组柱子 → 计划最前面加一条筛选，然后直接重算 */
+async function drillToGroup(column, value) {
+  if (!state.plan) return;
+  const dup = state.plan.steps.some((s) => s.op === 'filter_rows' && s.params.column === column && s.params.op === '==' && String(s.params.value) === String(value));
+  if (dup) return toast(`计划里已经有「${column} = ${value}」这个筛选了`, 'warn');
+  const steps = [{ op: 'filter_rows', params: { column, op: '==', value } }, ...state.plan.steps];
+  state.plan = {
+    ...state.plan,
+    question: `${state.plan.question || ''}（只看 ${value}）`.trim(),
+    steps: steps.map((s, i) => ({ ...s, id: `s${i + 1}` })),
+  };
+  state.run = null;
+  show('step4', false); show('step5', false);
+  renderPlan(state.plan);
+  toast(`已加筛选：${column} = ${value}，正在重算…`, 'ok');
+  await runPlan();
+}
+
 function addChartActions() {
   const el = $('chart');
   const svg = el.querySelector('svg');
@@ -1160,6 +1181,13 @@ function addChartActions() {
 }
 
 $('chart').addEventListener('click', async (e) => {
+  // 先看是不是「点柱子下钻」，再处理下载按钮
+  const drillEl = e.target.closest('[data-drill-value]');
+  if (drillEl) {
+    const col = drillEl.getAttribute('data-drill-col');
+    const val = drillEl.getAttribute('data-drill-value');
+    if (col && val) return drillToGroup(col, val);
+  }
   const act = e.target.closest('[data-act]')?.dataset.act;
   if (!act) return;
   const svg = $('chart').querySelector('svg');

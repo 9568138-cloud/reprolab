@@ -35,7 +35,8 @@ export function validatePlan(plan, dataset) {
       if (value === undefined) { if (!optional) errors.push(`${at}.params.${key} 必填`); continue; }
       if (base === 'number' && !Number.isFinite(Number(value))) errors.push(`${at}.params.${key} 必须是数字`);
       if (base === 'string' && typeof value !== 'string') errors.push(`${at}.params.${key} 必须是字符串`);
-      if (base === 'string' && columns.size > 0 && ['column', 'x', 'y'].includes(key) && !columns.has(value)) {
+      // base === 'any'：不校验类型（例如条件筛选的阈值，数值列给数字、文本列给字符串）
+      if (base === 'string' && columns.size > 0 && ['column', 'x', 'y', 'groupBy'].includes(key) && !columns.has(value)) {
         errors.push(`${at}.params.${key} 不存在列：${value}`);
       }
     }
