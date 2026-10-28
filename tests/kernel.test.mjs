@@ -50,6 +50,13 @@ test('白名单：未知算子被拒绝', () => {
   assert.throws(() => validatePlan({ version: 1, steps: [{ id: 's1', op: 'exec_python', params: {} }] }, ds(iris)), PlanError);
 });
 
+test('白名单：列名不存在也要被拒绝', () => {
+  assert.throws(
+    () => validatePlan({ version: 1, steps: [{ id: 's1', op: 'describe', params: { column: '不存在的列' } }] }, ds(iris)),
+    /不存在列/,
+  );
+});
+
 test('破坏性算子必须 confirm', () => {
   assert.throws(
     () => validatePlan({ version: 1, steps: [{ id: 's1', op: 'drop_outliers', params: { column: 'sepal_width_cm' } }] }, ds(iris)),

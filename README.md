@@ -46,6 +46,12 @@ node cli.mjs audit tests/fixtures/audit-case.json --data sample-data/中国70城
 node cli.mjs check sample-data/中国70城房价指数_环比.csv plan.json
 ```
 
+## 还能做什么
+
+- **计划是文件**：计划可导出为 plan.json，也可导入别人的计划；导入时会重新过白名单校验（列名写错、算子越界都会被拒）。
+- **报告能带走**：分析结果可导出为可打印 HTML（浏览器里 Ctrl+P 就是 PDF）；审计结果同样可导出 HTML。
+- **审计案可改**：审计用的结论 JSON 可以直接在页面上编辑，改一个数字再点审计，就能看到它被判「不符」。
+
 ## 提需求：点选 或 写一句话
 
 两种方式并存，点选更稳——它不靠关键词猜，也不靠列顺序猜：

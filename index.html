@@ -149,7 +149,13 @@
     <details class="dsl">
       <summary>查看计划 DSL（AI 只能输出这个结构，越界即拒绝执行）</summary>
       <pre id="planJson"></pre>
-      <div class="row"><button class="btn ghost" id="copyPlan">复制 JSON</button></div>
+      <div class="row">
+        <button class="btn ghost" id="copyPlan">复制 JSON</button>
+        <button class="btn ghost" id="exportPlan">导出计划（plan.json）</button>
+        <input type="file" id="planFile" accept=".json,application/json" hidden />
+        <button class="btn ghost" id="importPlan">导入计划</button>
+        <span class="hint">计划是显式 JSON：同一份数据 + 同一份计划，换台机器也能跑出同一哈希。</span>
+      </div>
     </details>
   </section>
 
@@ -180,6 +186,7 @@
     <div class="row">
       <button class="btn" id="recheckBtn">重跑一致性校验</button>
       <button class="btn primary" id="exportBtn">导出复现包（zip）</button>
+      <button class="btn ghost" id="exportReport">导出分析报告（HTML）</button>
       <span class="hint" id="recheckHint"></span>
     </div>
     <pre id="hashBox" class="hashbox"></pre>

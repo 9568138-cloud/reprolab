@@ -38,6 +38,7 @@ async function loadCsv(text, label = 'CSV') {
     state.plan = null;
     state.run = null;
     const hash = await sha256(text);
+    state.dataHash = hash;
     const numeric = dataset.columns.filter((c) => c.kind === 'number').map((c) => c.name);
     $('datasetInfo').innerHTML = [
       `<span class="chip">来源 <b>${label}</b></span>`,
@@ -337,6 +338,51 @@ $('copyPlan').addEventListener('click', async () => {
     toast('复制失败，请手动选中复制', 'warn');
   }
 });
+
+// ---------- 计划的导出 / 导入 ----------
+$('exportPlan').addEventListener('click', () => {
+  if (!state.plan) return toast('先生成一份计划', 'warn');
+  downloadText(`plan-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(state.plan, null, 2), 'application/json');
+  toast('计划已导出，换台机器导入即可跑出同一哈希', 'ok');
+});
+
+$('importPlan').addEventListener('click', () => {
+  if (!state.dataset) return toast('先载入数据，再导入计划', 'warn');
+  $('planFile').click();
+});
+
+$('planFile').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  try {
+    const raw = await file.text();
+    const plan = JSON.parse(raw);
+    validatePlan(plan, state.dataset); // 列名对不上、算子越界都会在这里被拦下
+    state.plan = plan;
+    state.run = null;
+    state.claims = [];
+    show('step4', false); show('step5', false);
+    $('hashBox').textContent = '';
+    renderPlan(plan);
+    show('step3', true);
+    toast(`已导入 ${plan.steps.length} 步计划（已过白名单校验）`, 'ok');
+  } catch (err) {
+    toast(`导入失败：${err.message}`, 'error');
+  } finally {
+    e.target.value = '';
+  }
+});
+
+/** 下载一段文本为一个文件 */
+function downloadText(filename, text, mime = 'text/plain') {
+  const blob = new Blob([text], { type: `${mime};charset=utf-8` });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 // ---------- 03 执行 ----------
 $('runBtn').addEventListener('click', () => runPlan());
@@ -660,6 +706,58 @@ $('exportBtn').addEventListener('click', async () => {
   $('hashBox').textContent = `已导出 ${pkg.files.length} 个文件\n数据 SHA-256：${pkg.dataHash}\n产物哈希：${pkg.artifactHash}\n解压后执行 node verify.mjs 可离线自校验。`;
   toast(`复现包已导出（${pkg.files.length} 个文件，含 verify.mjs）`, 'ok');
 });
+
+// ---------- 分析报告导出（HTML，可直接打印成 PDF） ----------
+$('exportReport').addEventListener('click', () => {
+  if (!state.run) return toast('先执行一次计划', 'warn');
+  const html = analysisHtmlReport();
+  downloadText(`分析报告-${new Date().toISOString().slice(0, 10)}.html`, html, 'text/html');
+  toast('分析报告已导出（可用浏览器打印成 PDF）', 'ok');
+});
+
+function analysisHtmlReport() {
+  const run = state.run;
+  const plan = state.plan;
+  const claims = state.claims.map((c) => ({ text: renderClaim(c, run.steps), verdict: c.verdict, refs: c.refs }));
+  const rowStyle = 'padding:8px 10px;border-bottom:1px solid #e3e7ef;text-align:left;vertical-align:top';
+  const claimsHtml = claims.map((c, i) => `<li style="margin-bottom:8px">${escapeHtml(c.text)}<div style="color:#5b6577;font-size:12px">出处：${c.refs.map((r) => `${r.stepId}.${r.field}`).join('、')}　判定：${escapeHtml(c.verdict)}</div></li>`).join('');
+  const stepsHtml = run.steps.map((s, i) => `<tr>
+    <td style="${rowStyle}">${i + 1}</td>
+    <td style="${rowStyle}">${escapeHtml(s.label)}</td>
+    <td style="${rowStyle};font-family:ui-monospace,Consolas,monospace;font-size:12px">${escapeHtml(JSON.stringify(s.params || {}))}</td>
+    <td style="${rowStyle};font-family:ui-monospace,Consolas,monospace;font-size:12px">${s.inputHash.slice(0, 12)}</td>
+    <td style="${rowStyle};font-family:ui-monospace,Consolas,monospace;font-size:12px">${s.outputHash.slice(0, 12)}</td>
+    <td style="${rowStyle};text-align:right">${s.ms}</td>
+  </tr>`).join('');
+  const dropped = run.droppedRows || [];
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>分析报告 · ${escapeHtml(plan.question || '分析结果')}</title>
+<style>
+body{font-family:"Segoe UI","Microsoft YaHei",sans-serif;max-width:960px;margin:40px auto;padding:0 24px;color:#1b2333;line-height:1.7}
+h1{font-size:22px;margin:0 0 6px} h2{font-size:15px;margin:26px 0 8px}
+.meta{color:#5b6577;font-size:13px;margin-bottom:8px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{color:#5b6577;font-size:12px;text-align:left;padding:8px 10px;border-bottom:1px solid #e3e7ef}
+code{background:#f3f4f7;padding:1px 6px;border-radius:4px;font-size:12px}
+footer{margin-top:28px;color:#8a93a5;font-size:12px}
+@media print{body{margin:0}}
+</style></head><body>
+<h1>${escapeHtml(plan.question || '分析报告')}</h1>
+<div class="meta">生成时间 ${new Date().toLocaleString('zh-CN')}　·　数据集 ${state.dataset.rowCount} 行 × ${state.dataset.columns.length} 列　·　计划来源 ${plan.engine === 'llm' ? 'LLM 编译（已校验）' : plan.engine === 'options' ? '点选生成（无 AI 参与）' : '本地规则编译'}</div>
+<div class="meta">数据 SHA-256 <code>${state.dataHash ? state.dataHash : '(见复现包)'}</code>　·　产物总哈希 <code>${run.artifactHash}</code></div>
+<h2>结论（每条都能回溯到计算步骤）</h2>
+<ol>${claimsHtml}</ol>
+<h2>步骤时间轴</h2>
+<table><thead><tr><th>#</th><th>算子</th><th>参数</th><th>输入哈希</th><th>输出哈希</th><th>耗时(ms)</th></tr></thead><tbody>${stepsHtml}</tbody></table>
+${dropped.length ? `<h2>数据变更</h2><p>本次剔除了 ${dropped.length} 行原始数据（CSV 行号：${dropped.slice(0, 30).join(', ')}${dropped.length > 30 ? ' …' : ''}）。</p>` : ''}
+<h2>怎么复现</h2>
+<ol>
+<li>把这份报告对应的 <code>data.csv</code> 和计划 JSON 导入 ReproLab，点「执行计划」，产物哈希应与上面一致；</li>
+<li>或者用命令行：<code>node cli.mjs check data.csv plan.json</code>，对比输出里的产物哈希；</li>
+<li>导出的复现包里带 <code>verify.mjs</code>，解压后 <code>node verify.mjs</code> 可离线自校验。</li>
+</ol>
+<footer>由溯真 ReproLab 生成 · 纯浏览器计算，数据不出本机。</footer>
+</body></html>`;
+}
 
 // ---------- 重置 ----------
 $('resetBtn').addEventListener('click', () => {
